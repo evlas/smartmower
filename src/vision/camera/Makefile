@@ -20,7 +20,7 @@ JSONCPP_LIBS = $(shell $(PKG_CONFIG) --libs jsoncpp 2>/dev/null || echo "-ljsonc
 
 # Additional libraries and flags
 CXXFLAGS += $(JSONCPP_CFLAGS) -I/usr/include/jsoncpp
-LDFLAGS = $(OPENCV_LIBS) $(JSONCPP_LIBS) -lmosquitto -lpthread -lstdc++fs
+LDFLAGS = $(OPENCV_LIBS) $(JSONCPP_LIBS) -lmosquitto -lpthread -lstdc++fs -lcjson
 
 # Configuration (unified)
 CONFIG = /opt/smartmower/etc/config/robot_config.json
@@ -31,7 +31,7 @@ INSTALL_BINDIR = $(PREFIX)/bin
 SYSCONFDIR = $(PREFIX)/etc
 
 # Targets
-TARGETS = $(BINDIR)/vision_camera_rpi
+TARGETS = $(BINDIR)/vision_camera $(BINDIR)/vision_camera_rpi
 
 # Source files
 SOURCES = $(wildcard $(SRCDIR)/*.cpp)

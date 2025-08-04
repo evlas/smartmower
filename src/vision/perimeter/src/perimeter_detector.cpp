@@ -20,8 +20,8 @@ struct Config {
     int port = 1883;
     std::string username;
     std::string password;
-    std::string subscribe_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_CAMERA;
-    std::string publish_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_PERIMETER;
+    std::string subscribe_topic = VISION_TOPIC_CAMERA;
+    std::string publish_topic = VISION_TOPIC_PERIMETER;
     std::string client_id = std::string(VISION_MQTT_CLIENT_ID) + "_perimeter";
     
     // Camera

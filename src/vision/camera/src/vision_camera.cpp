@@ -226,7 +226,7 @@ int load_config() {
         }
         
         // Set MQTT topic and client ID (these can remain from header)
-        config.mqtt_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_CAMERA;
+        config.mqtt_topic = VISION_TOPIC_CAMERA;
         config.mqtt_client_id = VISION_MQTT_CLIENT_CAMERA;
 
         // Parse camera settings from unified structure
