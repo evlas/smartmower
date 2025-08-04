@@ -1,0 +1,13 @@
+{
+  "gps": {
+    "device": "/dev/ttyAMA2",
+    "baudrate": 115200,
+    "protocol": "nmea",
+    "timeout_ms": 1000
+  },
+  "logging": {
+    "level": "debug",
+    "file": "/opt/smartmower/log/gps_bridge.log",
+    "data_dir": "/opt/smartmower/data/gps"
+  }
+}

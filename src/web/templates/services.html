@@ -1,0 +1,383 @@
+{% extends "base.html" %}
+
+{% block title %}Services - Smart Mower Control Panel{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2 mb-0">
+                <i class="bi bi-cpu-fill me-2"></i>Service Management
+            </h1>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary" onclick="refreshServices()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
+                <button class="btn btn-success" onclick="restartAllServices()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Restart All
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Services Overview -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-check-circle-fill text-success" style="font-size: 2rem;"></i>
+                <h5 class="card-title mt-2">Active</h5>
+                <h3 class="text-success" id="active-count">
+                    {{ services_status.values() | selectattr("equalto", "active") | list | length }}
+                </h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-x-circle-fill text-danger" style="font-size: 2rem;"></i>
+                <h5 class="card-title mt-2">Inactive</h5>
+                <h3 class="text-danger" id="inactive-count">
+                    {{ services_status.values() | selectattr("equalto", "inactive") | list | length }}
+                </h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-question-circle-fill text-warning" style="font-size: 2rem;"></i>
+                <h5 class="card-title mt-2">Unknown</h5>
+                <h3 class="text-warning" id="unknown-count">
+                    {{ services_status.values() | selectattr("equalto", "unknown") | list | length }}
+                </h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-list-ul text-info" style="font-size: 2rem;"></i>
+                <h5 class="card-title mt-2">Total</h5>
+                <h3 class="text-info">{{ services_status | length }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Service Details -->
+<div class="row">
+    {% for service, status in services_status.items() %}
+    <div class="col-lg-6 mb-4">
+        <div class="card service-card service-{{ status }}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0">
+                    {% if 'pico' in service %}
+                        <i class="bi bi-cpu me-2"></i>Pico Bridge
+                    {% elif 'gps' in service %}
+                        <i class="bi bi-geo-alt me-2"></i>GPS Bridge
+                    {% elif 'fusion' in service %}
+                        <i class="bi bi-diagram-3 me-2"></i>Sensor Fusion
+                    {% elif 'path-planning' in service %}
+                        <i class="bi bi-map me-2"></i>Path Planning
+                    {% elif 'slam' in service %}
+                        <i class="bi bi-compass me-2"></i>SLAM
+                    {% elif 'state-machine' in service %}
+                        <i class="bi bi-gear-wide-connected me-2"></i>State Machine
+                    {% elif 'vision-camera' in service %}
+                        <i class="bi bi-camera me-2"></i>Vision Camera
+                    {% elif 'vision-grass' in service %}
+                        <i class="bi bi-flower1 me-2"></i>Grass Detection
+                    {% elif 'vision-obstacle' in service %}
+                        <i class="bi bi-exclamation-triangle me-2"></i>Obstacle Detection
+                    {% elif 'vision-perimeter' in service %}
+                        <i class="bi bi-bounding-box me-2"></i>Perimeter Detection
+                    {% else %}
+                        <i class="bi bi-gear me-2"></i>{{ service.replace('smartmower-', '').replace('-', ' ').title() }}
+                    {% endif %}
+                </h6>
+                <span class="status-{{ status }}" id="status-{{ service }}">
+                    {{ status.upper() }}
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p class="mb-1"><strong>Service Name:</strong> {{ service }}</p>
+                        <p class="mb-1"><strong>Binary Path:</strong> /opt/smartmower/bin/{{ service.replace('smartmower-', '') }}</p>
+                        <p class="mb-1"><strong>Log File:</strong> /opt/smartmower/log/{{ service.replace('smartmower-', '') }}.log</p>
+                        <p class="mb-0"><strong>User:</strong> smartmower</p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <div class="btn-group-vertical w-100" role="group">
+                            <button class="btn btn-sm btn-outline-success" onclick="startService('{{ service }}')">
+                                <i class="bi bi-play-fill me-1"></i>Start
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning" onclick="stopService('{{ service }}')">
+                                <i class="bi bi-stop-fill me-1"></i>Stop
+                            </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="restartService('{{ service }}')">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Restart
+                            </button>
+                            <button class="btn btn-sm btn-outline-info" onclick="viewLogs('{{ service }}')">
+                                <i class="bi bi-file-text me-1"></i>Logs
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Service Details Toggle -->
+                <div class="mt-3">
+                    <button class="btn btn-sm btn-outline-secondary" type="button" 
+                            data-bs-toggle="collapse" data-bs-target="#details-{{ loop.index }}" 
+                            aria-expanded="false">
+                        <i class="bi bi-info-circle me-1"></i>Show Details
+                    </button>
+                </div>
+                
+                <!-- Collapsible Service Details -->
+                <div class="collapse mt-2" id="details-{{ loop.index }}">
+                    <div class="card card-body bg-light">
+                        <div id="service-details-{{ service }}" class="service-details">
+                            <p class="mb-1"><strong>Description:</strong> 
+                                {% if 'pico' in service %}
+                                    Hardware interface bridge for Pico microcontroller communication
+                                {% elif 'gps' in service %}
+                                    GPS sensor data processing and MQTT publishing
+                                {% elif 'fusion' in service %}
+                                    Multi-sensor data fusion for enhanced positioning
+                                {% elif 'path-planning' in service %}
+                                    Route planning and navigation algorithms
+                                {% elif 'slam' in service %}
+                                    Simultaneous Localization and Mapping
+                                {% elif 'state-machine' in service %}
+                                    Main robot state management and coordination
+                                {% elif 'vision-camera' in service %}
+                                    Camera feed processing and image capture
+                                {% elif 'vision-grass' in service %}
+                                    Grass detection and analysis algorithms
+                                {% elif 'vision-obstacle' in service %}
+                                    Obstacle detection and avoidance system
+                                {% elif 'vision-perimeter' in service %}
+                                    Perimeter boundary detection system
+                                {% else %}
+                                    Smart Mower service component
+                                {% endif %}
+                            </p>
+                            <p class="mb-1"><strong>Dependencies:</strong> 
+                                {% if 'state-machine' in service %}
+                                    All other services
+                                {% elif 'vision' in service %}
+                                    Camera hardware, OpenCV
+                                {% elif 'gps' in service %}
+                                    GPS hardware, MQTT broker
+                                {% elif 'fusion' in service %}
+                                    IMU sensors, GPS service
+                                {% else %}
+                                    MQTT broker, configuration file
+                                {% endif %}
+                            </p>
+                            <p class="mb-0"><strong>Config Section:</strong> 
+                                modules.{{ service.replace('smartmower-', '').replace('-', '_') }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Service Actions Modal -->
+<div class="modal fade" id="serviceActionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="serviceActionModalLabel">Service Action</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="serviceActionModalBody">
+                <!-- Content will be populated by JavaScript -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmServiceAction">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Log Viewer Modal -->
+<div class="modal fade" id="logViewerModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="logViewerModalLabel">Service Logs</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between mb-3">
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="refreshLogs()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearLogs()">
+                            <i class="bi bi-trash me-1"></i>Clear View
+                        </button>
+                    </div>
+                    <div>
+                        <select class="form-select form-select-sm" id="logLines" onchange="refreshLogs()">
+                            <option value="50">Last 50 lines</option>
+                            <option value="100" selected>Last 100 lines</option>
+                            <option value="200">Last 200 lines</option>
+                            <option value="500">Last 500 lines</option>
+                        </select>
+                    </div>
+                </div>
+                <pre id="logContent" class="bg-dark text-light p-3" style="height: 400px; overflow-y: auto; font-size: 0.875rem;">
+Loading logs...
+                </pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentService = '';
+let currentAction = '';
+
+function refreshServices() {
+    location.reload();
+}
+
+function startService(serviceName) {
+    performServiceAction(serviceName, 'start', 'Start Service', 
+        `Are you sure you want to start ${serviceName}?`);
+}
+
+function stopService(serviceName) {
+    performServiceAction(serviceName, 'stop', 'Stop Service', 
+        `Are you sure you want to stop ${serviceName}? This may affect robot operations.`);
+}
+
+function restartService(serviceName) {
+    performServiceAction(serviceName, 'restart', 'Restart Service', 
+        `Are you sure you want to restart ${serviceName}?`);
+}
+
+function performServiceAction(serviceName, action, title, message) {
+    currentService = serviceName;
+    currentAction = action;
+    
+    document.getElementById('serviceActionModalLabel').textContent = title;
+    document.getElementById('serviceActionModalBody').innerHTML = `
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-2"></i>
+            ${message}
+        </div>
+        <p><strong>Service:</strong> ${serviceName}</p>
+        <p><strong>Action:</strong> ${action.toUpperCase()}</p>
+    `;
+    
+    const modal = new bootstrap.Modal(document.getElementById('serviceActionModal'));
+    modal.show();
+}
+
+function restartAllServices() {
+    if (confirm('Are you sure you want to restart ALL services? This will temporarily interrupt all robot operations.')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/services/restart-all';
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function viewLogs(serviceName) {
+    currentService = serviceName;
+    document.getElementById('logViewerModalLabel').textContent = `Logs: ${serviceName}`;
+    
+    const modal = new bootstrap.Modal(document.getElementById('logViewerModal'));
+    modal.show();
+    
+    refreshLogs();
+}
+
+function refreshLogs() {
+    if (!currentService) return;
+    
+    const lines = document.getElementById('logLines').value;
+    const logContent = document.getElementById('logContent');
+    
+    logContent.textContent = 'Loading logs...';
+    
+    fetch(`/api/services/${currentService}/logs?lines=${lines}`)
+        .then(response => response.text())
+        .then(data => {
+            logContent.textContent = data || 'No logs available';
+            logContent.scrollTop = logContent.scrollHeight;
+        })
+        .catch(error => {
+            logContent.textContent = 'Error loading logs: ' + error;
+        });
+}
+
+function clearLogs() {
+    document.getElementById('logContent').textContent = '';
+}
+
+// Confirm service action
+document.getElementById('confirmServiceAction').addEventListener('click', function() {
+    if (currentService && currentAction) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = `/services/${currentAction}/${currentService}`;
+        document.body.appendChild(form);
+        form.submit();
+    }
+});
+
+// Auto-refresh service status every 10 seconds
+setInterval(function() {
+    fetch('/api/services/status')
+        .then(response => response.json())
+        .then(data => {
+            let activeCount = 0;
+            let inactiveCount = 0;
+            let unknownCount = 0;
+            
+            Object.keys(data).forEach(service => {
+                const statusElement = document.getElementById('status-' + service);
+                const cardElement = statusElement?.closest('.service-card');
+                
+                if (statusElement) {
+                    statusElement.className = 'status-' + (data[service] === 'active' ? 'active' : 
+                                                         data[service] === 'inactive' ? 'inactive' : 'unknown');
+                    statusElement.textContent = data[service].toUpperCase();
+                }
+                
+                if (cardElement) {
+                    cardElement.className = cardElement.className.replace(/service-(active|inactive|unknown)/, 
+                                                                         'service-' + data[service]);
+                }
+                
+                // Count statuses
+                if (data[service] === 'active') activeCount++;
+                else if (data[service] === 'inactive') inactiveCount++;
+                else unknownCount++;
+            });
+            
+            // Update counters
+            document.getElementById('active-count').textContent = activeCount;
+            document.getElementById('inactive-count').textContent = inactiveCount;
+            document.getElementById('unknown-count').textContent = unknownCount;
+        })
+        .catch(error => console.error('Error updating service status:', error));
+}, 10000);
+</script>
+{% endblock %}

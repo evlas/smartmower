@@ -1,0 +1,31 @@
+[Unit]
+Description=Smart Mower LCD Interface
+After=network.target
+
+[Service]
+Type=simple
+User=smartmower
+Group=smartmower
+WorkingDirectory=/opt/smartmower/bin
+ExecStart=/usr/bin/python3 /opt/smartmower/bin/lcd_interface.py
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=smartmower-lcd
+Environment=PYTHONUNBUFFERED=1
+
+# Security
+ProtectSystem=strict
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Permissions
+ReadWritePaths=/opt/smartmower/log /opt/smartmower/data
+
+[Install]
+WantedBy=multi-user.target

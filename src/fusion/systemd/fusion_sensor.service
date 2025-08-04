@@ -1,0 +1,18 @@
+[Unit]
+Description=Smart Mower Fusion Sensor Service
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=smartmower
+Group=smartmower
+WorkingDirectory=/opt/smartmower
+ExecStart=/opt/smartmower/bin/fusion_sensor /opt/smartmower/etc/config/robot_config.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

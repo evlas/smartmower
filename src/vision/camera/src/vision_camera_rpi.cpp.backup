@@ -1,0 +1,647 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <fstream>
+#include <csignal>
+#include <thread>
+#include <atomic>
+#include <mosquitto.h>
+#include <cjson/cJSON.h>
+#include <opencv2/opencv.hpp>
+#include <gst/gst.h>
+#include <gst/app/gstappsink.h>
+#include <glib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+// Vision MQTT definitions
+#include "vision_mqtt.h"
+
+// Configuration
+struct Config {
+    // MQTT settings
+    std::string mqtt_broker = "localhost";
+    int mqtt_port = 1883;
+    std::string mqtt_username;
+    std::string mqtt_password;
+    std::string mqtt_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_CAMERA;
+    std::string mqtt_client_id = std::string(VISION_MQTT_CLIENT_CAMERA) + "_rpi";
+    
+    // Camera settings
+    int width = 1296;
+    int height = 972;
+    int fps = 30;
+    int rotation = 0;
+    int jpeg_quality = 80;
+} config;
+
+// Global variables for cleanup
+static std::atomic<bool> running{true};
+static struct mosquitto *mosq = nullptr;
+static GMainLoop *main_loop = nullptr;
+static GstElement *g_pipeline = nullptr;  // Global pipeline reference
+static GstElement *appsink = nullptr;
+static GMutex mutex;
+static GCond cond;
+
+// Function declarations
+static void handle_signal(int signal);
+void cleanup();
+int load_config();
+int init_mqtt();
+int init_camera();
+static void process_frame(const cv::Mat& frame);
+std::string base64_encode(const unsigned char* data, size_t input_length);
+int send_image(const std::vector<uchar>& image_data, const std::string& timestamp);
+
+// GStreamer callbacks
+static gboolean bus_call(GstBus *bus, GstMessage *msg, gpointer data);
+static GstFlowReturn new_sample(GstAppSink *sink, gpointer data);
+
+// Base64 encoding implementation...
+std::string base64_encode(const unsigned char* data, size_t input_length) {
+    static const char base64_chars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string ret;
+    int i = 0, j = 0;
+    unsigned char char_array_3[3], char_array_4[4];
+
+    for (size_t n = 0; n < input_length; n++) {
+        char_array_3[i++] = data[n];
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+            for (i = 0; i < 4; i++) ret += base64_chars[char_array_4[i]];
+            i = 0;
+        }
+    }
+    if (i) {
+        for (j = i; j < 3; j++) char_array_3[j] = '\0';
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        for (j = 0; j < i + 1; j++) ret += base64_chars[char_array_4[j]];
+        while (i++ < 3) ret += '=';
+    }
+    return ret;
+}
+
+// Send image over MQTT
+int send_image(const std::vector<uchar>& image_data, const std::string& timestamp) {
+    if (!mosq) {
+        // MQTT client not initialized - silent error
+        return 0;
+    }
+    
+    static uint32_t sequence = 0;
+    sequence++;
+    
+    // Check connection status
+    int rc = mosquitto_loop(mosq, 0, 1);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        // MQTT connection error - attempting to reconnect
+        if (mosquitto_reconnect(mosq) != MOSQ_ERR_SUCCESS) {
+            // Failed to reconnect to MQTT broker
+            return 0;
+        }
+    }
+    
+    // Create JSON message following vision_mqtt.h camera image format
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        // Failed to create JSON object
+        return 0;
+    }
+    
+    cJSON_AddStringToObject(root, "type", VISION_JSON_CAMERA);
+    cJSON_AddNumberToObject(root, "timestamp", std::stol(timestamp));
+    cJSON_AddStringToObject(root, "camera_id", "camera_rpi");
+    
+    // Add image_info object
+    cJSON *image_info = cJSON_CreateObject();
+    if (image_info) {
+        cJSON_AddNumberToObject(image_info, "width", config.width);
+        cJSON_AddNumberToObject(image_info, "height", config.height);
+        cJSON_AddStringToObject(image_info, "format", "JPEG");
+        cJSON_AddNumberToObject(image_info, "sequence", sequence);
+        cJSON_AddItemToObject(root, "image_info", image_info);
+    }
+    
+    // Add base64 encoded image data
+    std::string img_base64 = base64_encode(image_data.data(), image_data.size());
+    cJSON_AddStringToObject(root, "image_data", img_base64.c_str());
+    
+    char *json_str = cJSON_PrintUnformatted(root);
+    if (!json_str) {
+        // Failed to create JSON string
+        cJSON_Delete(root);
+        return 0;
+    }
+    
+    // Print debug info after json_str is created
+
+
+
+
+    int result = mosquitto_publish(mosq, NULL, config.mqtt_topic.c_str(), 
+                                 strlen(json_str), json_str, 1, false);
+    
+    if (result != MOSQ_ERR_SUCCESS) {
+        // Failed to publish message to MQTT
+    } else {
+        // Force MQTT loop to ensure message is sent immediately
+        mosquitto_loop_write(mosq, 1);
+    }
+    
+    free(json_str);
+    cJSON_Delete(root);
+    return (result == MOSQ_ERR_SUCCESS) ? 1 : 0;
+}
+
+// Initialize camera with auto-detection
+int init_camera() {
+    // Initialize GStreamer
+    gst_init(NULL, NULL);
+    
+    // Try different pipeline variants with different devices and formats
+    const char* pipeline_variants[] = {
+        // YUYV format with videoconvert to BGR
+        "v4l2src device=/dev/video0 ! video/x-raw,format=YUYV,width=1296,height=972,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink sync=false drop=true",
+        // UYVY format with videoconvert to BGR
+        "v4l2src device=/dev/video0 ! video/x-raw,format=UYVY,width=1296,height=972,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink sync=false drop=true",
+        // Lower resolution test
+        "v4l2src device=/dev/video0 ! video/x-raw,format=YUYV,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink sync=false drop=true",
+        // Test with different video device
+        "v4l2src device=/dev/video1 ! video/x-raw,format=YUYV,width=1296,height=972,framerate=30/1 ! videoconvert ! video/x-raw,format=BGR ! appsink name=sink sync=false drop=true"
+    };
+    
+    // Build rotation filter if needed
+    std::string rotation_filter = "";
+    if (config.rotation != 0) {
+        std::stringstream rot_ss;
+        rot_ss << "! videoflip method=rotate-" << config.rotation << " ";
+        rotation_filter = rot_ss.str();
+    }
+    
+    // Try each pipeline until one works
+    GError *error = NULL;
+    GstElement *pipeline = NULL;
+    
+    // Set up GStreamer debug logging once
+    gst_debug_set_default_threshold(GST_LEVEL_DEBUG);
+    gst_debug_set_active(TRUE);
+    
+    // Print GStreamer version for debugging
+    guint major, minor, micro, nano;
+    gst_version(&major, &minor, &micro, &nano);
+
+    // Try each pipeline variant
+    for (const auto& tpl : pipeline_variants) {
+        // Use the pipeline template as-is since we're not using format placeholders anymore
+        std::string pipeline_str = tpl;
+        
+        // Try to create the pipeline
+        error = NULL;
+        pipeline = gst_parse_launch(pipeline_str.c_str(), &error);
+        
+        if (pipeline) {
+
+            break;
+        }
+        
+        if (error) {
+            g_error_free(error);
+            error = NULL;
+        }
+    }
+    
+    // Check if any pipeline was created successfully
+    if (!pipeline) {
+        // Failed to create any pipeline
+        return 0;
+    }
+    
+    // Get the bus and add watch
+    GstBus *bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
+    if (!bus) {
+        // Failed to get pipeline bus
+        gst_object_unref(pipeline);
+        return 0;
+    }
+    gst_bus_add_watch(bus, bus_call, NULL);
+    gst_object_unref(bus);
+    
+    // Set up appsink with more detailed error reporting
+    appsink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+    if (!appsink) {
+        // Failed to get appsink element
+        gst_object_unref(pipeline);
+        return 0;
+    }
+    
+    // Set appsink properties
+    g_object_set(G_OBJECT(appsink), "emit-signals", TRUE, NULL);
+    g_object_set(G_OBJECT(appsink), "sync", FALSE, NULL);
+    g_object_set(G_OBJECT(appsink), "drop", TRUE, NULL);
+    g_object_set(G_OBJECT(appsink), "max-buffers", 1, NULL);
+    
+
+    
+    // Connect to new-sample signal
+    GstAppSinkCallbacks callbacks;
+    memset(&callbacks, 0, sizeof(callbacks));
+    callbacks.new_sample = new_sample; // Only set the callback we need
+    gst_app_sink_set_callbacks(GST_APP_SINK(appsink), &callbacks, NULL, NULL);
+    
+    // Set pipeline state to PLAYING
+
+    GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        // Failed to start pipeline
+        gst_object_unref(appsink);
+        gst_object_unref(pipeline);
+        return 0;
+    } else if (ret == GST_STATE_CHANGE_ASYNC) {
+
+        // Wait for the pipeline to reach PLAYING state
+        GstState state;
+        GstState pending;
+        GstStateChangeReturn state_ret = gst_element_get_state(pipeline, &state, &pending, 5 * GST_SECOND);
+        
+        if (state_ret == GST_STATE_CHANGE_SUCCESS) {
+
+        } else if (state_ret == GST_STATE_CHANGE_ASYNC) {
+
+        } else {
+            std::cerr << "[ERROR] Failed to change pipeline state: " << gst_element_state_change_return_get_name(state_ret) 
+                      << " (current: " << gst_element_state_get_name(state) 
+                      << ", pending: " << gst_element_state_get_name(pending) << ")" << std::endl;
+            gst_object_unref(appsink);
+            gst_object_unref(pipeline);
+            return 0;
+        }
+    } else {
+
+    }
+    
+
+    
+    // Store the pipeline in the global variable
+    g_pipeline = pipeline;
+    return 1;
+}
+
+// Capture and process frame (called from appsink callback)
+static void process_frame(const cv::Mat& frame) {
+    if (frame.empty()) return;
+    
+    auto now = std::chrono::system_clock::now();
+    auto now_time = std::chrono::system_clock::to_time_t(now);
+    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()) % 1000;
+    
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S");
+    ss << '.' << std::setfill('0') << std::setw(3) << now_ms.count();
+    
+    std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, config.jpeg_quality};
+    std::vector<uchar> buffer;
+    if (cv::imencode(".jpg", frame, buffer, params)) {
+        send_image(buffer, ss.str());
+    }
+}
+
+// Initialize MQTT connection
+int init_mqtt() {
+    mosquitto_lib_init();
+    mosq = mosquitto_new(config.mqtt_client_id.c_str(), true, NULL);
+    if (!mosq) {
+        // Failed to create mosquitto instance
+        return 0;
+    }
+    
+    // Enable debug messages
+    mosquitto_log_callback_set(mosq, [](mosquitto */*mosq*/, void */*userdata*/, int /*level*/, const char *str) {
+        // MQTT message
+    });
+    
+    if (!config.mqtt_username.empty() && !config.mqtt_password.empty()) {
+        if (mosquitto_username_pw_set(mosq, config.mqtt_username.c_str(), 
+                                    config.mqtt_password.c_str()) != MOSQ_ERR_SUCCESS) {
+            // Failed to set MQTT credentials
+            return 0;
+        }
+
+    }
+    
+    // Set will message
+    std::string will_topic = std::string(VISION_MQTT_BASE_TOPIC) + "status";
+    mosquitto_will_set(mosq, will_topic.c_str(), 6, "OFFLINE", 0, true);
+    
+    // Connect with 5 second timeout
+    if (mosquitto_connect(mosq, config.mqtt_broker.c_str(), config.mqtt_port, 5) != MOSQ_ERR_SUCCESS) {
+        // Failed to connect to MQTT broker
+        mosq = nullptr;
+        return 0;
+    }
+    
+    // Start network loop in a separate thread
+    mosquitto_loop_start(mosq);
+    
+    // Publish online status
+    mosquitto_publish(mosq, NULL, will_topic.c_str(), 2, "ON", 0, true);
+    
+
+    
+    return 1;
+}
+
+// Cleanup resources
+void cleanup() {
+    // Cleaning up resources
+    
+    // Stop pipeline
+    if (g_pipeline) {
+        gst_element_set_state(g_pipeline, GST_STATE_NULL);
+        gst_object_unref(g_pipeline);
+        g_pipeline = nullptr;
+    }
+    
+    // Cleanup MQTT
+    if (mosq) {
+        mosquitto_disconnect(mosq);
+        mosquitto_destroy(mosq);
+        mosquitto_lib_cleanup();
+        mosq = nullptr;
+    }
+    
+    // Cleanup GStreamer
+    gst_deinit();
+    
+
+}
+
+// Signal handler
+static void handle_signal(int signal) {
+    (void)signal;  // Mark as unused
+    // Received interrupt signal, shutting down...
+    
+    running = false;
+    
+    // Notify main thread to exit
+    g_mutex_lock(&mutex);
+    g_cond_signal(&cond);
+    g_mutex_unlock(&mutex);
+    
+    // Stop the main loop
+    if (main_loop) {
+        g_main_loop_quit(main_loop);
+    }
+}
+
+// Load configuration
+int load_config() {
+    try {
+        // Set MQTT topic and client ID (these can remain from header)
+        config.mqtt_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_CAMERA;
+        config.mqtt_client_id = std::string(VISION_MQTT_CLIENT_CAMERA) + "_rpi";
+        
+        // Load camera and logging settings from centralized robot_config.json
+        std::ifstream config_file("/opt/smartmower/etc/config/robot_config.json");
+        if (!config_file.is_open()) {
+            // Using default configuration
+            return 1; // Use defaults
+        }
+
+        std::string content((std::istreambuf_iterator<char>(config_file)),
+                           std::istreambuf_iterator<char>());
+        
+        cJSON* root = cJSON_Parse(content.c_str());
+        if (!root) {
+            // Error parsing robot_config.json
+            return 0;
+        }
+
+        // Parse MQTT settings from unified configuration
+        cJSON* system = cJSON_GetObjectItemCaseSensitive(root, "system");
+        if (system) {
+            cJSON* communication = cJSON_GetObjectItemCaseSensitive(system, "communication");
+            if (communication) {
+                cJSON* mqtt_broker_host = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_host");
+                cJSON* mqtt_broker_port = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_port");
+                cJSON* mqtt_username = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_username");
+                cJSON* mqtt_password = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_password");
+                
+                if (cJSON_IsString(mqtt_broker_host)) config.mqtt_broker = mqtt_broker_host->valuestring;
+                if (cJSON_IsNumber(mqtt_broker_port)) config.mqtt_port = mqtt_broker_port->valueint;
+                if (cJSON_IsString(mqtt_username)) config.mqtt_username = mqtt_username->valuestring;
+                if (cJSON_IsString(mqtt_password)) config.mqtt_password = mqtt_password->valuestring;
+            }
+        }
+
+        // Parse camera settings from centralized structure: modules.vision.camera
+        cJSON* modules = cJSON_GetObjectItemCaseSensitive(root, "modules");
+        if (!modules) {
+            // Modules section not found in config
+            cJSON_Delete(root);
+            return 0;
+        }
+        
+        cJSON* vision = cJSON_GetObjectItemCaseSensitive(modules, "vision");
+        if (!vision) {
+            // Vision section not found in modules
+            cJSON_Delete(root);
+            return 0;
+        }
+        
+        cJSON* camera = cJSON_GetObjectItemCaseSensitive(vision, "camera");
+        if (camera) {
+            // Parse RPI camera settings
+            cJSON* rpi_camera = cJSON_GetObjectItemCaseSensitive(camera, "rpi_camera");
+            if (rpi_camera) {
+                cJSON* width = cJSON_GetObjectItemCaseSensitive(rpi_camera, "resolution_width");
+                cJSON* height = cJSON_GetObjectItemCaseSensitive(rpi_camera, "resolution_height");
+                cJSON* fps = cJSON_GetObjectItemCaseSensitive(rpi_camera, "fps");
+                
+                if (cJSON_IsNumber(width)) config.width = width->valueint;
+                if (cJSON_IsNumber(height)) config.height = height->valueint;
+                if (cJSON_IsNumber(fps)) config.fps = fps->valueint;
+            }
+            
+            // Parse RPI-specific settings
+            cJSON* rpi = cJSON_GetObjectItemCaseSensitive(camera, "rpi_camera");
+            if (rpi) {
+                cJSON* rotation = cJSON_GetObjectItemCaseSensitive(rpi, "rotation");
+                cJSON* jpeg_quality = cJSON_GetObjectItemCaseSensitive(rpi, "image_quality");
+                
+                if (cJSON_IsNumber(rotation)) config.rotation = rotation->valueint;
+                if (cJSON_IsNumber(jpeg_quality)) config.jpeg_quality = jpeg_quality->valueint;
+            }
+        }
+        
+        cJSON_Delete(root);
+
+        return 1;
+    } catch (const std::exception& e) {
+        // Error loading config
+        return 0;
+    }
+}
+
+// GStreamer bus callback
+static gboolean bus_call(GstBus *bus, GstMessage *msg, gpointer data) {
+    (void)bus;  // Unused parameter
+    (void)data; // Unused parameter
+    switch (GST_MESSAGE_TYPE(msg)) {
+        case GST_MESSAGE_EOS:
+            // End of stream
+            g_main_loop_quit(main_loop);
+            break;
+        case GST_MESSAGE_ERROR: {
+            gchar *debug;
+            GError *error;
+            gst_message_parse_error(msg, &error, &debug);
+            g_printerr("Error: %s\n", error->message);
+            g_error_free(error);
+            g_free(debug);
+            g_main_loop_quit(main_loop);
+            break;
+        }
+        default:
+            break;
+    }
+    return TRUE;
+}
+
+// Appsink callback
+static GstFlowReturn new_sample(GstAppSink *sink, gpointer data) {
+    (void)data; // Unused parameter
+    GstSample *sample = NULL;
+    GstBuffer *buffer = NULL;
+    GstMapInfo map;
+    GstFlowReturn ret = GST_FLOW_OK;
+    
+    // Get the sample from appsink
+    g_signal_emit_by_name(sink, "pull-sample", &sample);
+    if (!sample) {
+        return GST_FLOW_ERROR;
+    }
+    
+    // Get buffer from sample
+    buffer = gst_sample_get_buffer(sample);
+    if (!buffer) {
+        gst_sample_unref(sample);
+        return GST_FLOW_ERROR;
+    }
+    
+    // Map the buffer
+    if (!gst_buffer_map(buffer, &map, GST_MAP_READ)) {
+        gst_sample_unref(sample);
+        return GST_FLOW_ERROR;
+    }
+    
+    try {
+        // Create OpenCV Mat from buffer data
+        cv::Mat frame(config.height, config.width, CV_8UC3, (void*)map.data, cv::Mat::AUTO_STEP);
+        
+        if (frame.empty()) {
+            std::cerr << "[ERROR] Created empty frame from buffer data" << std::endl;
+        } else {
+            std::cout << "[DEBUG] Created frame: " << frame.cols << "x" << frame.rows 
+                      << " channels: " << frame.channels() << " type: " << frame.type() << std::endl;
+            
+            // Save a test image to verify frame capture
+            static int frame_count = 0;
+            if (frame_count++ % 30 == 0) {  // Save every ~1 second at 30fps
+                std::string filename = "/tmp/frame_" + std::to_string(time(NULL)) + ".jpg";
+                cv::imwrite(filename, frame);
+                std::cout << "[DEBUG] Saved test frame to " << filename << std::endl;
+            }
+            
+            // Process the frame (resize, encode, publish)
+            process_frame(frame);
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error processing frame: " << e.what() << std::endl;
+    }
+    
+    // Cleanup
+    gst_buffer_unmap(buffer, &map);
+    gst_sample_unref(sample);
+    
+    return ret;
+}
+
+int main(int /*argc*/, char **/*argv*/) {
+    // Initialize mutex and condition
+    g_mutex_init(&mutex);
+    g_cond_init(&cond);
+    
+    // Set up signal handlers
+    struct sigaction sa;
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        std::cerr << "Errore: Impossibile impostare il gestore di SIGINT" << std::endl;
+        return 1;
+    }
+    
+    if (sigaction(SIGTERM, &sa, NULL) == -1) {
+        std::cerr << "Errore: Impossibile impostare il gestore di SIGTERM" << std::endl;
+        return 1;
+    }
+    
+    // Initialize MQTT
+    mosquitto_lib_init();
+    mosq = mosquitto_new(config.mqtt_client_id.c_str(), true, NULL);
+    if (!mosq) {
+        std::cerr << "Errore: Impossibile inizializzare MQTT" << std::endl;
+        return 1;
+    }
+    
+    if (!load_config() || !init_mqtt() || !init_camera()) {
+        cleanup();
+        return 1;
+    }
+    
+    // Connect to new-sample signal
+    g_signal_connect(appsink, "new-sample", G_CALLBACK(new_sample), NULL);
+    
+    // Start pipeline
+    GstStateChangeReturn ret = gst_element_set_state(g_pipeline, GST_STATE_PLAYING);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "Failed to start pipeline" << std::endl;
+        cleanup();
+        return 1;
+    }
+    
+    std::cout << "Raspberry Pi Camera Module started. Press Ctrl+C to exit." << std::endl;
+    
+    // Create and run main loop
+    main_loop = g_main_loop_new(NULL, FALSE);
+    
+    // Wait for termination signal
+    g_mutex_lock(&mutex);
+    while (running) {
+        g_cond_wait(&cond, &mutex);
+    }
+    g_mutex_unlock(&mutex);
+    
+    // Cleanup
+    cleanup();
+    
+    // Cleanup GLib resources
+    g_cond_clear(&cond);
+    g_mutex_clear(&mutex);
+    
+    std::cout << "Exiting..." << std::endl;
+    return 0;
+}

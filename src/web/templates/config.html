@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - Smart Mower Control Panel{% endblock %}
+
+{% block extra_css %}
+<style>
+    .config-tabs .nav-link {
+        color: var(--smartmower-primary);
+        border: 1px solid #dee2e6;
+        margin-right: 0.25rem;
+    }
+    
+    .config-tabs .nav-link.active {
+        background-color: var(--smartmower-primary);
+        color: white;
+        border-color: var(--smartmower-primary);
+    }
+    
+    .form-control:focus {
+        border-color: var(--smartmower-accent);
+        box-shadow: 0 0 0 0.2rem rgba(127, 176, 105, 0.25);
+    }
+    
+    .form-select:focus {
+        border-color: var(--smartmower-accent);
+        box-shadow: 0 0 0 0.2rem rgba(127, 176, 105, 0.25);
+    }
+    
+    .parameter-group {
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-left: 4px solid var(--smartmower-accent);
+    }
+    
+    .parameter-label {
+        font-weight: 600;
+        color: var(--smartmower-primary);
+        margin-bottom: 0.25rem;
+    }
+    
+    .parameter-description {
+        font-size: 0.875rem;
+        color: #6c757d;
+        margin-bottom: 0.5rem;
+    }
+    
+    .json-preview {
+        background: #2d3748;
+        color: #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 0.875rem;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    
+    .battery-profile-card {
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        transition: all 0.3s ease;
+    }
+    
+    .battery-profile-card.selected {
+        border-color: var(--smartmower-accent);
+        background-color: rgba(127, 176, 105, 0.1);
+    }
+    
+    .save-indicator {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1050;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1 class="h2 mb-0">
+                <i class="bi bi-sliders me-2"></i>Robot Configuration
+            </h1>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary" onclick="resetChanges()">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+                </button>
+                <button class="btn btn-success" onclick="saveConfiguration()">
+                    <i class="bi bi-check-lg me-1"></i>Save & Apply
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Save Indicator -->
+<div id="save-indicator" class="save-indicator" style="display: none;">
+    <div class="alert alert-info">
+        <i class="bi bi-cloud-arrow-up me-2"></i>Saving configuration...
+    </div>
+</div>
+
+<!-- Configuration Tabs -->
+<div class="row">
+    <div class="col-12">
+        <ul class="nav nav-tabs config-tabs" id="configTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="battery-tab" data-bs-toggle="tab" data-bs-target="#battery" type="button" role="tab">
+                    <i class="bi bi-battery-full me-1"></i>Battery System
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="hardware-tab" data-bs-toggle="tab" data-bs-target="#hardware" type="button" role="tab">
+                    <i class="bi bi-cpu me-1"></i>Hardware
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tuning-tab" data-bs-toggle="tab" data-bs-target="#tuning" type="button" role="tab">
+                    <i class="bi bi-sliders me-1"></i>Tuning
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="modules-tab" data-bs-toggle="tab" data-bs-target="#modules" type="button" role="tab">
+                    <i class="bi bi-puzzle me-1"></i>Modules
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced" type="button" role="tab">
+                    <i class="bi bi-code-square me-1"></i>Advanced
+                </button>
+            </li>
+        </ul>
+    </div>
+</div>
+
+<!-- Tab Content -->
+<div class="tab-content mt-3" id="configTabContent">
+    <!-- Battery System Tab -->
+    <div class="tab-pane fade show active" id="battery" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Battery System Configuration</h5>
+            </div>
+            <div class="card-body">
+                <!-- Battery Profile Selection -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Battery Profile Selection</div>
+                    <div class="parameter-description">Choose the battery profile that matches your robot's power system</div>
+                    
+                    <div class="row" id="battery-profiles">
+                        {% for profile_name, profile_data in config_data.battery_system.battery_profiles.items() %}
+                        <div class="col-md-6 col-lg-4">
+                            <div class="battery-profile-card" data-profile="{{ profile_name }}">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="battery_profile" 
+                                           id="profile_{{ profile_name }}" value="{{ profile_name }}"
+                                           {{ 'checked' if config_data.modules.pico.battery_profile == profile_name else '' }}>
+                                    <label class="form-check-label fw-bold" for="profile_{{ profile_name }}">
+                                        {{ profile_data.name }}
+                                    </label>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted d-block">
+                                        <strong>Chemistry:</strong> {{ profile_data.chemistry }}<br>
+                                        <strong>Nominal:</strong> {{ profile_data.nominal_voltage_v }}V<br>
+                                        <strong>Capacity:</strong> {{ profile_data.capacity_ah }}Ah<br>
+                                        <strong>Cells:</strong> {{ profile_data.cell_count }}S
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <!-- Battery Thresholds -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Battery Thresholds</div>
+                    <div class="parameter-description">Configure voltage thresholds for battery management</div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label class="form-label">Low Battery (%)</label>
+                            <input type="number" class="form-control" id="battery_low_threshold" 
+                                   value="{{ config_data.tuning.battery_thresholds.low_battery_percent }}" 
+                                   min="0" max="100" step="1">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Critical Battery (%)</label>
+                            <input type="number" class="form-control" id="battery_critical_threshold" 
+                                   value="{{ config_data.tuning.battery_thresholds.critical_battery_percent }}" 
+                                   min="0" max="100" step="1">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Return to Dock (%)</label>
+                            <input type="number" class="form-control" id="battery_return_threshold" 
+                                   value="{{ config_data.tuning.battery_thresholds.return_to_dock_percent }}" 
+                                   min="0" max="100" step="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Hardware Tab -->
+    <div class="tab-pane fade" id="hardware" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Hardware Configuration</h5>
+            </div>
+            <div class="card-body">
+                <!-- Chassis Parameters -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Chassis Dimensions</div>
+                    <div class="parameter-description">Physical robot dimensions and constraints</div>
+                    
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label class="form-label">Length (m)</label>
+                            <input type="number" class="form-control" id="chassis_length" 
+                                   value="{{ config_data.hardware.chassis.length_m }}" 
+                                   min="0" max="2" step="0.01">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Width (m)</label>
+                            <input type="number" class="form-control" id="chassis_width" 
+                                   value="{{ config_data.hardware.chassis.width_m }}" 
+                                   min="0" max="2" step="0.01">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Height (m)</label>
+                            <input type="number" class="form-control" id="chassis_height" 
+                                   value="{{ config_data.hardware.chassis.height_m }}" 
+                                   min="0" max="1" step="0.01">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Weight (kg)</label>
+                            <input type="number" class="form-control" id="chassis_weight" 
+                                   value="{{ config_data.hardware.chassis.weight_kg }}" 
+                                   min="0" max="100" step="0.1">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Cutting System -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Cutting System</div>
+                    <div class="parameter-description">Cutting deck and blade specifications</div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label class="form-label">Blade Diameter (m)</label>
+                            <input type="number" class="form-control" id="blade_diameter" 
+                                   value="{{ config_data.hardware.cutting_deck.blade_diameter_m }}" 
+                                   min="0" max="1" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Max Cutting Height (mm)</label>
+                            <input type="number" class="form-control" id="max_cutting_height" 
+                                   value="{{ config_data.hardware.cutting_deck.max_cutting_height_mm }}" 
+                                   min="10" max="200" step="1">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Min Cutting Height (mm)</label>
+                            <input type="number" class="form-control" id="min_cutting_height" 
+                                   value="{{ config_data.hardware.cutting_deck.min_cutting_height_mm }}" 
+                                   min="5" max="100" step="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tuning Tab -->
+    <div class="tab-pane fade" id="tuning" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Tuning Parameters</h5>
+            </div>
+            <div class="card-body">
+                <!-- Motion Control -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Motion Control</div>
+                    <div class="parameter-description">Speed and acceleration parameters</div>
+                    
+                    <div class="row">
+                        <div class="col-md-3">
+                            <label class="form-label">Max Speed (m/s)</label>
+                            <input type="number" class="form-control" id="max_speed" 
+                                   value="{{ config_data.tuning.motion.max_speed_ms }}" 
+                                   min="0.1" max="5.0" step="0.1">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Normal Speed (m/s)</label>
+                            <input type="number" class="form-control" id="normal_speed" 
+                                   value="{{ config_data.tuning.motion.normal_speed_ms }}" 
+                                   min="0.1" max="3.0" step="0.1">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Slow Speed (m/s)</label>
+                            <input type="number" class="form-control" id="slow_speed" 
+                                   value="{{ config_data.tuning.motion.slow_speed_ms }}" 
+                                   min="0.05" max="1.0" step="0.05">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Max Acceleration (m/s²)</label>
+                            <input type="number" class="form-control" id="max_acceleration" 
+                                   value="{{ config_data.tuning.motion.max_acceleration_ms2 }}" 
+                                   min="0.1" max="5.0" step="0.1">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Cutting Parameters -->
+                <div class="parameter-group">
+                    <div class="parameter-label">Cutting Parameters</div>
+                    <div class="parameter-description">Cutting pattern and blade settings</div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <label class="form-label">Cutting Pattern</label>
+                            <select class="form-select" id="cutting_pattern">
+                                {% for pattern in config_data.tuning.cutting.available_patterns %}
+                                <option value="{{ pattern }}" {{ 'selected' if pattern == config_data.tuning.cutting.pattern else '' }}>
+                                    {{ pattern.replace('_', ' ').title() }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Cutting Width (m)</label>
+                            <input type="number" class="form-control" id="cutting_width" 
+                                   value="{{ config_data.tuning.cutting.cutting_width_m }}" 
+                                   min="0.1" max="1.0" step="0.01">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Cutting Height (mm)</label>
+                            <input type="number" class="form-control" id="cutting_height" 
+                                   value="{{ config_data.tuning.cutting.cutting_height_mm }}" 
+                                   min="20" max="80" step="1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modules Tab -->
+    <div class="tab-pane fade" id="modules" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Module Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for module_name, module_config in config_data.modules.items() %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card">
+                            <div class="card-header">
+                                <h6 class="mb-0">{{ module_name.title() }} Module</h6>
+                            </div>
+                            <div class="card-body">
+                                {% if module_config.logging %}
+                                <div class="mb-2">
+                                    <label class="form-label">Log Level</label>
+                                    <select class="form-select form-select-sm" id="log_level_{{ module_name }}">
+                                        <option value="debug" {{ 'selected' if module_config.logging.level == 'debug' else '' }}>Debug</option>
+                                        <option value="info" {{ 'selected' if module_config.logging.level == 'info' else '' }}>Info</option>
+                                        <option value="warning" {{ 'selected' if module_config.logging.level == 'warning' else '' }}>Warning</option>
+                                        <option value="error" {{ 'selected' if module_config.logging.level == 'error' else '' }}>Error</option>
+                                    </select>
+                                </div>
+                                {% endif %}
+                                
+                                {% if module_config.mqtt %}
+                                <div class="mb-2">
+                                    <label class="form-label">MQTT Topic</label>
+                                    <input type="text" class="form-control form-control-sm" 
+                                           id="mqtt_topic_{{ module_name }}" 
+                                           value="{{ module_config.mqtt.base_topic }}">
+                                </div>
+                                {% endif %}
+                                
+                                <small class="text-muted">
+                                    Status: <span class="status-active" id="status-smartmower-{{ module_name }}">ACTIVE</span>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Advanced Tab -->
+    <div class="tab-pane fade" id="advanced" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Advanced Configuration (JSON Editor)</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Warning:</strong> Direct JSON editing is for advanced users only. 
+                    Invalid JSON will prevent the system from starting.
+                </div>
+                
+                <div class="mb-3">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="formatJson()">
+                        <i class="bi bi-code me-1"></i>Format JSON
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="validateJson()">
+                        <i class="bi bi-check-circle me-1"></i>Validate JSON
+                    </button>
+                </div>
+                
+                <textarea id="json-editor" class="form-control json-editor" rows="20" 
+                          placeholder="Loading configuration...">{{ config_data | tojson(indent=2) }}</textarea>
+                
+                <div id="json-validation" class="mt-2" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let originalConfig = {{ config_data | tojson }};
+let currentConfig = JSON.parse(JSON.stringify(originalConfig));
+
+// Battery profile selection
+document.querySelectorAll('input[name="battery_profile"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        document.querySelectorAll('.battery-profile-card').forEach(card => {
+            card.classList.remove('selected');
+        });
+        this.closest('.battery-profile-card').classList.add('selected');
+        
+        // Update config
+        currentConfig.modules.pico.battery_profile = this.value;
+    });
+});
+
+// Initialize selected battery profile
+document.querySelector('input[name="battery_profile"]:checked')?.closest('.battery-profile-card').classList.add('selected');
+
+function saveConfiguration() {
+    // Show save indicator
+    document.getElementById('save-indicator').style.display = 'block';
+    
+    // Collect all form data
+    collectFormData();
+    
+    // Send to server
+    fetch('/config/save', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currentConfig)
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('save-indicator').style.display = 'none';
+        
+        if (data.success) {
+            // Show success message and ask about service restart
+            if (confirm('Configuration saved successfully! Do you want to restart all services to apply changes?')) {
+                window.location.href = '/services/restart-all';
+            }
+        } else {
+            alert('Error saving configuration: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        document.getElementById('save-indicator').style.display = 'none';
+        alert('Error saving configuration: ' + error);
+    });
+}
+
+function collectFormData() {
+    // Battery thresholds
+    currentConfig.tuning.battery_thresholds.low_battery_percent = parseInt(document.getElementById('battery_low_threshold').value);
+    currentConfig.tuning.battery_thresholds.critical_battery_percent = parseInt(document.getElementById('battery_critical_threshold').value);
+    currentConfig.tuning.battery_thresholds.return_to_dock_percent = parseInt(document.getElementById('battery_return_threshold').value);
+    
+    // Hardware - Chassis
+    if (document.getElementById('chassis_length')) {
+        currentConfig.hardware.chassis.length_m = parseFloat(document.getElementById('chassis_length').value);
+        currentConfig.hardware.chassis.width_m = parseFloat(document.getElementById('chassis_width').value);
+        currentConfig.hardware.chassis.height_m = parseFloat(document.getElementById('chassis_height').value);
+        currentConfig.hardware.chassis.weight_kg = parseFloat(document.getElementById('chassis_weight').value);
+    }
+    
+    // Hardware - Cutting
+    if (document.getElementById('blade_diameter')) {
+        currentConfig.hardware.cutting_deck.blade_diameter_m = parseFloat(document.getElementById('blade_diameter').value);
+        currentConfig.hardware.cutting_deck.max_cutting_height_mm = parseInt(document.getElementById('max_cutting_height').value);
+        currentConfig.hardware.cutting_deck.min_cutting_height_mm = parseInt(document.getElementById('min_cutting_height').value);
+    }
+    
+    // Tuning - Motion
+    if (document.getElementById('max_speed')) {
+        currentConfig.tuning.motion.max_speed_ms = parseFloat(document.getElementById('max_speed').value);
+        currentConfig.tuning.motion.normal_speed_ms = parseFloat(document.getElementById('normal_speed').value);
+        currentConfig.tuning.motion.slow_speed_ms = parseFloat(document.getElementById('slow_speed').value);
+        currentConfig.tuning.motion.max_acceleration_ms2 = parseFloat(document.getElementById('max_acceleration').value);
+    }
+    
+    // Tuning - Cutting
+    if (document.getElementById('cutting_pattern')) {
+        currentConfig.tuning.cutting.pattern = document.getElementById('cutting_pattern').value;
+        currentConfig.tuning.cutting.cutting_width_m = parseFloat(document.getElementById('cutting_width').value);
+        currentConfig.tuning.cutting.cutting_height_mm = parseInt(document.getElementById('cutting_height').value);
+    }
+    
+    // Advanced JSON editor
+    if (document.getElementById('json-editor').value.trim()) {
+        try {
+            currentConfig = JSON.parse(document.getElementById('json-editor').value);
+        } catch (e) {
+            // Keep current config if JSON is invalid
+        }
+    }
+}
+
+function resetChanges() {
+    if (confirm('Are you sure you want to reset all changes?')) {
+        location.reload();
+    }
+}
+
+function formatJson() {
+    const editor = document.getElementById('json-editor');
+    try {
+        const parsed = JSON.parse(editor.value);
+        editor.value = JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        alert('Invalid JSON: ' + e.message);
+    }
+}
+
+function validateJson() {
+    const editor = document.getElementById('json-editor');
+    const validation = document.getElementById('json-validation');
+    
+    try {
+        JSON.parse(editor.value);
+        validation.innerHTML = '<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>JSON is valid</div>';
+        validation.style.display = 'block';
+        setTimeout(() => validation.style.display = 'none', 3000);
+    } catch (e) {
+        validation.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>Invalid JSON: ' + e.message + '</div>';
+        validation.style.display = 'block';
+    }
+}
+
+// Auto-save draft every 30 seconds
+setInterval(() => {
+    collectFormData();
+    localStorage.setItem('smartmower_config_draft', JSON.stringify(currentConfig));
+}, 30000);
+
+// Load draft on page load
+window.addEventListener('load', () => {
+    const draft = localStorage.getItem('smartmower_config_draft');
+    if (draft) {
+        try {
+            const draftConfig = JSON.parse(draft);
+            // You could implement draft restoration here
+        } catch (e) {
+            // Ignore invalid draft
+        }
+    }
+});
+</script>
+{% endblock %}

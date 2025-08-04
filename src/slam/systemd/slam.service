@@ -1,0 +1,31 @@
+[Unit]
+Description=Smart Mower SLAM Node
+After=network.target mosquitto.service
+Wants=network.target
+Requires=mosquitto.service
+
+[Service]
+Type=simple
+User=smartmower
+Group=smartmower
+WorkingDirectory=/opt/smartmower/bin
+ExecStart=/opt/smartmower/bin/slam_node /opt/smartmower/etc/config/robot_config.json
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smartmower-slam
+
+# Environment variables
+Environment=MQTT_BROKER=localhost
+Environment=MQTT_PORT=1883
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/smartmower/etc/config /opt/smartmower/log /opt/smartmower/data
+
+[Install]
+WantedBy=multi-user.target

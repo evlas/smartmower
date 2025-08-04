@@ -1,0 +1,31 @@
+{
+    "camera": {
+        "common": {
+            "width": 640,
+            "height": 480,
+            "fps": 15
+        },
+        "usb": {
+            "type": "usb",
+            "device": "/dev/video0"
+        },
+        "rpi": {
+            "type": "rpi",
+            "rotation": 0,
+            "jpeg_quality": 80,
+            "hdr": true,
+            "denoise": true
+        }
+    },
+    "logging": {
+        "level": "info",
+        "usb": {
+            "file": "/opt/smartmower/log/vision_camera.log",
+            "data_dir": "/opt/smartmower/data/vision/camera"
+        },
+        "rpi": {
+            "file": "/var/log/smartmower/vision_camera_rpi.log",
+            "data_dir": "/opt/smartmower/data/vision/camera_rpi"
+        }
+    }
+}

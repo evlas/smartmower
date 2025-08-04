@@ -1,0 +1,45 @@
+[Unit]
+Description=Smart Mower Obstacle Detection Service
+Documentation=man:obstacle_detector(1)
+After=network.target mosquitto.service
+Wants=network.target
+PartOf=smartmower.target
+
+[Service]
+Type=simple
+User=smartmower
+Group=smartmower
+ExecStart=/opt/smartmower/bin/obstacle_detector --config /opt/smartmower/etc/config/robot_config.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=smartmower-obstacle
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHostname=true
+ProtectClock=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+RestrictNamespaces=true
+
+# Allow access to specific directories
+ReadWritePaths=/opt/smartmower/etc/config /opt/smartmower/log /opt/smartmower/data
+
+# Resource limits
+LimitNOFILE=1024
+LimitNPROC=100
+
+[Install]
+WantedBy=multi-user.target
+Also=smartmower.target

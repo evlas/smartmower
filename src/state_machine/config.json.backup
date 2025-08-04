@@ -1,0 +1,118 @@
+{
+  "state_machine": {
+    "robot_parameters": {
+      "battery": {
+        "low_threshold": 20.0,
+        "full_threshold": 95.0,
+        "critical_threshold": 10.0
+      },
+      "area": {
+        "total_area_sqm": 6000,
+        "cutting_width_m": 0.44,
+        "dock_position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "dock_tolerance_m": 0.5
+      },
+      "navigation": {
+        "pattern": "spiral",
+        "max_speed_mps": 1.11,
+        "min_speed_mps": 0.1,
+        "turn_radius_m": 0.3,
+        "obstacle_avoidance": true,
+        "perimeter_safety_distance_m": 0.2
+      },
+      "obstacle_detection": {
+        "camera": {
+          "detection_range_m": 3.0,
+          "warning_distance_m": 2.0,
+          "deceleration_factor": 0.7
+        },
+        "sonar": {
+          "detection_range_m": 1.5,
+          "warning_distance_m": 0.5,
+          "critical_distance_m": 0.3,
+          "deceleration_factor": 0.3,
+          "stop_distance_m": 0.15
+        },
+        "bumper": {
+          "contact_speed_mps": 0.05,
+          "emergency_stop": true
+        },
+        "fallback": {
+          "default_sonar_distance_m": 2.0,
+          "default_camera_distance_m": 5.0,
+          "sensor_timeout_ms": 1000,
+          "safe_mode_speed_factor": 0.2
+        }
+      }
+    },
+    "timeouts": {
+      "init_timeout_s": 30,
+      "docking_timeout_s": 300,
+      "undocking_timeout_s": 60,
+      "charging_timeout_s": 14400,
+      "mowing_session_max_s": 7200
+    }
+  },
+    "state_definitions": {
+      "init": {
+        "enabled": true,
+        "timeout_s": 30,
+        "required_sensors": ["imu", "gps", "battery"],
+        "required_services": ["mqtt", "fusion"]
+      },
+      "idle": {
+        "enabled": true,
+        "heartbeat_interval_s": 30,
+        "auto_start_conditions": {
+          "battery_min": 80.0,
+          "weather_check": false
+        }
+      },
+      "mowing": {
+        "enabled": true,
+        "pattern": "spiral",
+        "area_coverage_target": 6000,
+        "battery_return_threshold": 25.0,
+        "obstacle_pause_duration_s": 10,
+        "progress_report_interval_s": 300
+      },
+      "charging": {
+        "enabled": true,
+        "max_charging_time_s": 14400,
+        "resume_mission_battery_level": 80.0,
+        "full_charge_level": 95.0
+      },
+      "emergency": {
+        "enabled": true,
+        "auto_recovery": false,
+        "manual_reset_required": true,
+        "emergency_contacts": []
+      }
+    }
+  },
+  "mqtt_settings": {
+    "qos": 1,
+    "retain": true,
+    "keepalive": 60
+  },
+  "logging": {
+    "enabled": true,
+    "level": "INFO",
+    "file": "/opt/smartmower/log/state_machine.log",
+    "max_file_size_mb": 10,
+    "backup_count": 5,
+    "console_output": true
+  },
+  "debug": {
+    "enabled": false,
+    "simulation_mode": false,
+    "test_events": {
+      "enabled": false,
+      "init_complete_delay_s": 10,
+      "start_mowing_delay_s": 20
+    }
+  }
+}

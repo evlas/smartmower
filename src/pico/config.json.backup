@@ -1,0 +1,40 @@
+{
+    "pico": {
+      "device": "/dev/ttyAMA1",
+      "baudrate": 115200,
+      "timeout_ms": 1000
+    },
+    "battery": {
+      "type": "lithium_ion",
+      "cells": 6,
+      "nominal_voltage_per_cell": 3.7,
+      "max_voltage_per_cell": 4.2,
+      "min_voltage_per_cell": 3.0,
+      "capacity_ah": 5.0,
+      "charging": {
+        "full_voltage_per_cell": 4.15,
+        "trickle_current_ma": 100,
+        "stable_time_seconds": 300,
+        "current_threshold_ma": 50
+      },
+      "voltage_curve": {
+        "100": 4.2,
+        "90": 4.1,
+        "80": 4.0,
+        "70": 3.9,
+        "60": 3.8,
+        "50": 3.75,
+        "40": 3.7,
+        "30": 3.65,
+        "20": 3.6,
+        "10": 3.4,
+        "5": 3.2,
+        "0": 3.0
+      }
+    },
+    "logging": {
+      "level": "debug",
+      "file": "/opt/smartmower/log/pico_bridge.log",
+      "data_dir": "/opt/smartmower/data/pico"
+    }
+  }
