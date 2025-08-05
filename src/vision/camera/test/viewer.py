@@ -54,24 +54,39 @@ class ImageViewer:
             print(f"Received message on topic {msg.topic}")
             print(f"Message length: {len(msg.payload)} bytes")
             
-            # Parse JSON message
-            message = json.loads(msg.payload.decode())
-            timestamp = message.get('timestamp', '')
-            raw_data = message.get('image', '')
-            
-            if not raw_data:
-                print("No image data in message")
-                return
-                
-            print(f"Raw data length: {len(raw_data)} characters")
-            print(f"Timestamp: {timestamp}")
-            
-            # Decode base64 image
             try:
-                image_bytes = base64.b64decode(raw_data)
-                print(f"Decoded image size: {len(image_bytes)} bytes")
+                # Parse JSON message
+                message = json.loads(msg.payload.decode())
+                
+                # Extract data from new message format
+                timestamp = message.get('timestamp', '')
+                image_info = message.get('image_info', {})
+                raw_data = message.get('image_data', '')
+                
+                if not raw_data:
+                    print("No image data in message")
+                    return
+                    
+                print(f"Raw data length: {len(raw_data)} characters")
+                print(f"Timestamp: {timestamp}")
+                print(f"Image info: {json.dumps(image_info, indent=2)}")
+                
+                # Decode base64 image
+                try:
+                    image_bytes = base64.b64decode(raw_data)
+                    print(f"Decoded image size: {len(image_bytes)} bytes")
+                except Exception as e:
+                    print(f"Base64 decode error: {e}")
+                    return
+                    
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                print(f"Message content (first 200 chars): {msg.payload.decode('utf-8', errors='replace')[:200]}")
+                return
             except Exception as e:
-                print(f"Base64 decode error: {e}")
+                print(f"Error processing message: {e}")
+                import traceback
+                traceback.print_exc()
                 return
             
             # Convert to OpenCV image

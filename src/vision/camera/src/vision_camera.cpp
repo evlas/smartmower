@@ -33,8 +33,11 @@ struct Config {
     int mqtt_port = 1883;
     std::string mqtt_username;
     std::string mqtt_password;
-    std::string mqtt_topic = std::string(VISION_MQTT_BASE_TOPIC) + VISION_TOPIC_CAMERA;
-    std::string mqtt_client_id = VISION_MQTT_CLIENT_CAMERA;
+    std::string mqtt_base_topic = "smartmower";
+    std::string mqtt_topic = "smartmower/vision/camera/frame";
+    std::string mqtt_status_topic = "smartmower/vision/camera/status";
+    std::string mqtt_commands_topic = "smartmower/vision/camera/commands";
+    std::string mqtt_client_id = "vision_camera";
     int mqtt_qos = 1;
     bool mqtt_retain = false;
     
@@ -107,10 +110,12 @@ int send_image(const std::vector<uchar>& image_data, const std::string& timestam
     sequence++;
 
     // Create JSON message following vision_mqtt.h camera image format
+    std::string timestamp_str = "\"" + timestamp + "\"";
+    
     std::string json_msg = 
         "{"
         "\"type\":\"" + std::string(VISION_JSON_CAMERA) + "\","
-        "\"timestamp\":" + timestamp + ","
+        "\"timestamp\":" + timestamp_str + ","
         "\"camera_id\":\"camera_0\","
         "\"image_info\":{"
             "\"width\":" + std::to_string(config.width) + ","
@@ -121,9 +126,10 @@ int send_image(const std::vector<uchar>& image_data, const std::string& timestam
         "\"image_data\":\"" + base64_encode(image_data.data(), image_data.size()) + "\""
         "}";
 
-    // Publish message
+    // Publish message with configured QoS and retain
     int result = mosquitto_publish(mosq, nullptr, config.mqtt_topic.c_str(), 
-                                 json_msg.length(), json_msg.c_str(), 0, false);
+                                 json_msg.length(), json_msg.c_str(), 
+                                 config.mqtt_qos, config.mqtt_retain);
     
     return (result == MOSQ_ERR_SUCCESS) ? 0 : -1;
 }
@@ -204,54 +210,73 @@ int load_config() {
         
         cJSON* root = cJSON_Parse(content.c_str());
         if (!root) {
-            std::cerr << "Error parsing robot_config.json: " << cJSON_GetErrorPtr() << std::endl;
+            std::cerr << "Error parsing robot_config.json" << std::endl;
             return 0;
         }
 
-        // Parse MQTT settings from unified configuration
-        cJSON* system = cJSON_GetObjectItemCaseSensitive(root, "system");
-        if (system) {
-            cJSON* communication = cJSON_GetObjectItemCaseSensitive(system, "communication");
-            if (communication) {
-                cJSON* mqtt_broker_host = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_host");
-                cJSON* mqtt_broker_port = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_port");
-                cJSON* mqtt_username = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_username");
-                cJSON* mqtt_password = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_password");
-                
-                if (cJSON_IsString(mqtt_broker_host)) config.mqtt_broker = mqtt_broker_host->valuestring;
-                if (cJSON_IsNumber(mqtt_broker_port)) config.mqtt_port = mqtt_broker_port->valueint;
-                if (cJSON_IsString(mqtt_username)) config.mqtt_username = mqtt_username->valuestring;
-                if (cJSON_IsString(mqtt_password)) config.mqtt_password = mqtt_password->valuestring;
+        // Parse MQTT settings
+        cJSON* mqtt = cJSON_GetObjectItem(root, "mqtt");
+        if (mqtt) {
+            // Base MQTT settings
+            cJSON* broker = cJSON_GetObjectItem(mqtt, "broker");
+            cJSON* port = cJSON_GetObjectItem(mqtt, "port");
+            cJSON* username = cJSON_GetObjectItem(mqtt, "username");
+            cJSON* password = cJSON_GetObjectItem(mqtt, "password");
+            cJSON* base_topic = cJSON_GetObjectItem(mqtt, "base_topic");
+            
+            if (cJSON_IsString(broker)) config.mqtt_broker = broker->valuestring;
+            if (cJSON_IsNumber(port)) config.mqtt_port = port->valueint;
+            if (cJSON_IsString(username)) config.mqtt_username = username->valuestring;
+            if (cJSON_IsString(password)) config.mqtt_password = password->valuestring;
+            if (cJSON_IsString(base_topic)) config.mqtt_base_topic = base_topic->valuestring;
+            
+            // Parse additional MQTT settings
+            cJSON* device_id = cJSON_GetObjectItemCaseSensitive(mqtt, "device_id");
+            
+            if (cJSON_IsString(device_id)) {
+                config.mqtt_client_id = std::string(device_id->valuestring) + "_vision_camera";
+            }
+            
+            // Parse topics
+            cJSON* topics = cJSON_GetObjectItemCaseSensitive(mqtt, "topics");
+            if (topics) {
+                cJSON* camera = cJSON_GetObjectItemCaseSensitive(topics, "camera");
+                if (camera) {
+                    cJSON* base = cJSON_GetObjectItemCaseSensitive(camera, "base");
+                    cJSON* subtopics = cJSON_GetObjectItemCaseSensitive(camera, "subtopics");
+                    
+                    if (cJSON_IsString(base) && subtopics) {
+                        std::string base_path = std::string(config.mqtt_base_topic) + "/" + base->valuestring;
+                        
+                        cJSON* frame = cJSON_GetObjectItemCaseSensitive(subtopics, "frame");
+                        cJSON* status = cJSON_GetObjectItemCaseSensitive(subtopics, "status");
+                        cJSON* commands = cJSON_GetObjectItemCaseSensitive(subtopics, "commands");
+                        
+                        if (cJSON_IsString(frame)) 
+                            config.mqtt_topic = base_path + "/" + frame->valuestring;
+                        if (cJSON_IsString(status))
+                            config.mqtt_status_topic = base_path + "/" + status->valuestring;
+                        if (cJSON_IsString(commands))
+                            config.mqtt_commands_topic = base_path + "/" + commands->valuestring;
+                    }
+                }
             }
         }
         
-        // Set MQTT topic and client ID (these can remain from header)
-        config.mqtt_topic = VISION_TOPIC_CAMERA;
-        config.mqtt_client_id = VISION_MQTT_CLIENT_CAMERA;
-
-        // Parse camera settings from unified structure
-        cJSON* camera = cJSON_GetObjectItemCaseSensitive(root, "camera");
-        if (camera) {
-            // Parse common settings
-            cJSON* common = cJSON_GetObjectItemCaseSensitive(camera, "common");
-            if (common) {
-                cJSON* width = cJSON_GetObjectItemCaseSensitive(common, "width");
-                cJSON* height = cJSON_GetObjectItemCaseSensitive(common, "height");
-                cJSON* fps = cJSON_GetObjectItemCaseSensitive(common, "fps");
+        // Parse camera settings
+        cJSON* vision = cJSON_GetObjectItemCaseSensitive(root, "vision_config");
+        if (vision) {
+            cJSON* camera = cJSON_GetObjectItemCaseSensitive(vision, "camera");
+            if (camera) {
+                cJSON* device = cJSON_GetObjectItemCaseSensitive(camera, "device");
+                cJSON* width = cJSON_GetObjectItemCaseSensitive(camera, "width");
+                cJSON* height = cJSON_GetObjectItemCaseSensitive(camera, "height");
+                cJSON* fps = cJSON_GetObjectItemCaseSensitive(camera, "fps");
                 
+                if (cJSON_IsString(device)) config.camera_device = device->valuestring;
                 if (cJSON_IsNumber(width)) config.width = width->valueint;
                 if (cJSON_IsNumber(height)) config.height = height->valueint;
                 if (cJSON_IsNumber(fps)) config.fps = fps->valueint;
-            }
-            
-            // Parse USB-specific settings
-            cJSON* usb = cJSON_GetObjectItemCaseSensitive(camera, "usb");
-            if (usb) {
-                cJSON* type = cJSON_GetObjectItemCaseSensitive(usb, "type");
-                cJSON* device = cJSON_GetObjectItemCaseSensitive(usb, "device");
-                
-                if (cJSON_IsString(type)) config.camera_type = type->valuestring;
-                if (cJSON_IsString(device)) config.camera_device = device->valuestring;
                 
                 // Try to extract camera index from device path (e.g., /dev/video0 -> 0)
                 if (config.camera_device.find("/dev/video") == 0) {
@@ -264,24 +289,16 @@ int load_config() {
             }
         }
         
-        // Parse logging settings from unified structure
-        cJSON* logging = cJSON_GetObjectItemCaseSensitive(root, "logging");
-        if (logging) {
-            cJSON* level = cJSON_GetObjectItemCaseSensitive(logging, "level");
-            if (cJSON_IsString(level)) config.log_level = level->valuestring;
-            
-            // Parse USB-specific logging settings
-            cJSON* usb = cJSON_GetObjectItemCaseSensitive(logging, "usb");
-            if (usb) {
-                cJSON* file = cJSON_GetObjectItemCaseSensitive(usb, "file");
-                if (cJSON_IsString(file)) config.log_file = file->valuestring;
-            }
-        }
-
         cJSON_Delete(root);
-        std::cout << "Configuration loaded successfully from robot_config.json" << std::endl;
+        
+        std::cout << "Configuration loaded successfully" << std::endl;
         std::cout << "MQTT: " << config.mqtt_broker << ":" << config.mqtt_port 
                   << " (user: " << config.mqtt_username << ")" << std::endl;
+        std::cout << "Client ID: " << config.mqtt_client_id << std::endl;
+        std::cout << "Topics - Frame: " << config.mqtt_topic 
+                  << ", Status: " << config.mqtt_status_topic 
+                  << ", Commands: " << config.mqtt_commands_topic << std::endl;
+        
         return 1;
     } catch (const std::exception& e) {
         std::cerr << "Error loading config: " << e.what() << std::endl;

@@ -6,6 +6,12 @@ CXX = g++
 CXXFLAGS = -Wall -Wextra -O2 -std=c++14 -pthread -Iinclude
 PKG_CONFIG = pkg-config
 
+# Directory structure
+SRCDIR = src
+OBJDIR = obj
+BINDIR = bin
+SYSTEMDDIR = systemd
+
 # OpenCV flags
 OPENCV_CFLAGS = $(shell $(PKG_CONFIG) --cflags opencv4 2>/dev/null || $(PKG_CONFIG) --cflags opencv)
 OPENCV_LIBS = $(shell $(PKG_CONFIG) --libs opencv4 2>/dev/null || $(PKG_CONFIG) --libs opencv)
@@ -18,25 +24,34 @@ CONFIG = robot_config.json
 
 # Installation directories
 PREFIX ?= /opt/smartmower
-BINDIR = $(PREFIX)/bin
+INSTALL_BINDIR = $(PREFIX)/bin
 SYSCONFDIR = $(PREFIX)/etc/config
 
 # Target executable
-TARGET = sfm_obstacle_detector
+TARGET = $(BINDIR)/sfm_obstacle_detector
 
 # Source files
-SOURCES = src/sfm_obstacle_detector.cpp
+SOURCES = $(SRCDIR)/sfm_obstacle_detector.cpp
+OBJECTS = $(patsubst $(SRCDIR)/%.cpp,$(OBJDIR)/%.o,$(SOURCES))
 
 # Default target
 all: $(TARGET)
 
+# Create directories
+$(OBJDIR) $(BINDIR):
+	mkdir -p $@
+
 # Build the executable
-$(TARGET): $(SOURCES)
-	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -o $@ $< $(LIBS)
+$(TARGET): $(OBJECTS) | $(BINDIR)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+
+# Compile source files
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) $(OPENCV_CFLAGS) -c -o $@ $<
 
 # Clean build files
 clean:
-	rm -f $(TARGET) *.o debug_output/*.jpg
+	rm -rf $(OBJDIR) $(BINDIR)
 
 # Install target
 install: $(TARGET)

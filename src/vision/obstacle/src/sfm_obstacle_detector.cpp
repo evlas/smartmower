@@ -30,6 +30,8 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <fstream>
+#include <sstream>
 
 // MQTT and JSON
 #include <mosquitto.h>
@@ -42,41 +44,44 @@
  * Configuration structure
  */
 struct Config {
-    // MQTT settings (read from unified configuration)
-    std::string mqtt_broker = "localhost";
-    int mqtt_port = 1883;
+    // MQTT settings
+    std::string mqtt_broker;
+    int mqtt_port;
     std::string mqtt_username;
     std::string mqtt_password;
-    std::string mqtt_topic = "smartmower/vision/camera";
-    std::string mqtt_velocity_topic = "smartmower/fusion/data";
+    std::string mqtt_camera_topic;
+    std::string mqtt_velocity_topic;
+    std::string mqtt_obstacles_topic;
+    int mqtt_qos;
+    bool mqtt_retain;
     
     // Camera calibration
-    double focal_length_x = 350.0;
-    double focal_length_y = 350.0;
-    double principal_point_x = 320.0;
-    double principal_point_y = 240.0;
+    double focal_length_x;
+    double focal_length_y;
+    double principal_point_x;
+    double principal_point_y;
     
     // Robot parameters
-    double camera_height = 0.3;
-    double max_detection_range = 5.0;
+    double camera_height;
+    double max_detection_range;
+    double min_obstacle_distance;
     
     // SfM parameters
-    int max_corners = 150;
-    double quality_level = 0.005;
-    double min_distance = 15.0;
-    int block_size = 5;
-    double harris_k = 0.04;
+    int max_corners;
+    double quality_level;
+    double min_distance;
+    int block_size;
+    double harris_k;
     
     // Obstacle detection
-    double max_obstacle_distance = 7.0;
-    double min_obstacle_distance = 0.1;
-    int min_frames_tracked = 2;
-    double max_optical_flow_error = 150.0;
-    int min_points_threshold = 70;
-    double displacement_threshold = 0.08;
+    int min_frames_tracked;
+    double max_optical_flow_error;
+    int min_points_threshold;
+    double displacement_threshold;
+    double publish_threshold;
     
     // Debug
-    bool debug_enabled = true;
+    bool debug_enabled;
 };
 
 /**
@@ -199,21 +204,20 @@ public:
  */
 class SfMObstacleDetector {
 private:
-    // Configuration
-    Config config_;
-    
-    // MQTT
+    // MQTT client
     struct mosquitto* mqtt_client_ = nullptr;
     
+    // Configurazione
+    Config config_;
+    
     // Threading
-    std::atomic<bool> running_{false};
     std::thread processing_thread_;
     
     // Frame and velocity management
     FrameBuffer frame_buffer_;
     VelocityManager velocity_manager_;
-    
-    // Computer vision
+    std::atomic<bool> running_{false};
+    int frame_count_{0};  // Contatore frame per debug
     cv::Mat previous_frame_;
     std::chrono::system_clock::time_point previous_timestamp_;
     std::vector<TrackedPoint> tracked_points_;
@@ -227,7 +231,28 @@ private:
 
 public:
     SfMObstacleDetector() {
+        // Configurazione di default
+        config_.mqtt_broker = "localhost";
+        config_.mqtt_port = 1883;
+        config_.mqtt_username = "";
+        config_.mqtt_password = "";
+        
+        // Carica la configurazione dal file
+        const char* configPath = "/opt/smartmower/etc/config/robot_config.json";
+        if (!loadConfigFromFile(configPath)) {
+            std::cerr << "Using default MQTT configuration" << std::endl;
+        } else {
+            std::cout << "MQTT configuration loaded from " << configPath << std::endl;
+            std::cout << "Broker: " << config_.mqtt_broker << ":" << config_.mqtt_port << std::endl;
+        }
+        
+        // Inizializza il client MQTT
         mosquitto_lib_init();
+        mqtt_client_ = mosquitto_new(nullptr, true, this);
+        
+        if (!mqtt_client_) {
+            throw std::runtime_error("Failed to create MQTT client");
+        }
     }
     
     ~SfMObstacleDetector() {
@@ -238,154 +263,235 @@ public:
         mosquitto_lib_cleanup();
     }
     
-    bool loadConfig(const std::string& config_file = "/opt/smartmower/etc/config/robot_config.json") {
-        std::ifstream file(config_file);
-        if (!file.is_open()) {
-            std::cout << "Using default configuration (robot_config.json not found)" << std::endl;
-            return true;
-        }
-        
-        std::string content((std::istreambuf_iterator<char>(file)),
-                           std::istreambuf_iterator<char>());
-        
-        cJSON* root = cJSON_Parse(content.c_str());
-        if (!root) {
-            std::cerr << "Error parsing robot_config.json" << std::endl;
+    bool loadConfigFromFile(const std::string& filename) {
+        std::ifstream config_file(filename);
+        if (!config_file.is_open()) {
+            std::cerr << "Failed to open config file: " << filename << std::endl;
             return false;
         }
         
-        // Parse MQTT settings from unified configuration
-        cJSON* system = cJSON_GetObjectItemCaseSensitive(root, "system");
-        if (system) {
-            cJSON* communication = cJSON_GetObjectItemCaseSensitive(system, "communication");
-            if (communication) {
-                cJSON* mqtt_broker_host = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_host");
-                cJSON* mqtt_broker_port = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_port");
-                cJSON* mqtt_username = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_username");
-                cJSON* mqtt_password = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_password");
-                
-                if (cJSON_IsString(mqtt_broker_host)) config_.mqtt_broker = mqtt_broker_host->valuestring;
-                if (cJSON_IsNumber(mqtt_broker_port)) config_.mqtt_port = mqtt_broker_port->valueint;
-                if (cJSON_IsString(mqtt_username)) config_.mqtt_username = mqtt_username->valuestring;
-                if (cJSON_IsString(mqtt_password)) config_.mqtt_password = mqtt_password->valuestring;
-            }
+        std::string json_str((std::istreambuf_iterator<char>(config_file)),
+                            std::istreambuf_iterator<char>());
+        
+        cJSON* root = cJSON_Parse(json_str.c_str());
+        if (!root) {
+            std::cerr << "Failed to parse config file" << std::endl;
+            return false;
         }
         
-        // Load obstacle detection configuration
-        if (cJSON* obstacle_detection = cJSON_GetObjectItem(root, "obstacle_detection")) {
-            // Load robot configuration
-            if (cJSON* robot = cJSON_GetObjectItem(obstacle_detection, "robot")) {
-                if (cJSON* height = cJSON_GetObjectItem(robot, "camera_height"))
-                    config_.camera_height = height->valuedouble;
-                if (cJSON* range = cJSON_GetObjectItem(robot, "max_detection_range"))
-                    config_.max_detection_range = range->valuedouble;
+        // Load MQTT settings
+        cJSON* mqtt = cJSON_GetObjectItem(root, "mqtt");
+        if (mqtt) {
+            cJSON* broker = cJSON_GetObjectItem(mqtt, "broker");
+            cJSON* port = cJSON_GetObjectItem(mqtt, "port");
+            cJSON* username = cJSON_GetObjectItem(mqtt, "username");
+            cJSON* password = cJSON_GetObjectItem(mqtt, "password");
+            cJSON* base_topic = cJSON_GetObjectItem(mqtt, "base_topic");
+            
+            // Get obstacle specific MQTT settings
+            cJSON* topics = cJSON_GetObjectItem(mqtt, "topics");
+            if (topics) {
+                cJSON* obstacle = cJSON_GetObjectItem(topics, "obstacle");
+                if (obstacle) {
+                    // Get QoS and retain settings
+                    cJSON* qos = cJSON_GetObjectItem(obstacle, "qos");
+                    cJSON* retain = cJSON_GetObjectItem(obstacle, "retain");
+                    
+                    if (cJSON_IsNumber(qos)) {
+                        config_.mqtt_qos = qos->valueint;
+                    }
+                    if (cJSON_IsBool(retain)) {
+                        config_.mqtt_retain = cJSON_IsTrue(retain);
+                    }
+                    
+                    // Get obstacles topic if specified
+                    cJSON* subtopics = cJSON_GetObjectItem(obstacle, "subtopics");
+                    if (subtopics) {
+                        cJSON* obstacles_topic = cJSON_GetObjectItem(subtopics, "obstacles");
+                        if (cJSON_IsString(obstacles_topic)) {
+                            if (cJSON_IsString(base_topic)) {
+                                config_.mqtt_obstacles_topic = std::string(base_topic->valuestring) + "/" + 
+                                                             std::string(obstacles_topic->valuestring);
+                            } else {
+                                config_.mqtt_obstacles_topic = std::string(obstacles_topic->valuestring);
+                            }
+                        }
+                    }
+                }
             }
             
-            // Load camera configuration
-            if (cJSON* camera = cJSON_GetObjectItem(obstacle_detection, "camera")) {
-                if (cJSON* fx = cJSON_GetObjectItem(camera, "focal_length_x"))
-                    config_.focal_length_x = fx->valuedouble;
-                if (cJSON* fy = cJSON_GetObjectItem(camera, "focal_length_y"))
-                    config_.focal_length_y = fy->valuedouble;
-                if (cJSON* cx = cJSON_GetObjectItem(camera, "principal_point_x"))
-                    config_.principal_point_x = cx->valuedouble;
-                if (cJSON* cy = cJSON_GetObjectItem(camera, "principal_point_y"))
-                    config_.principal_point_y = cy->valuedouble;
-                // Note: width and height not stored in Config struct - used directly from camera parameters
-            }
-            
-            // Load SfM parameters
-            if (cJSON* sfm = cJSON_GetObjectItem(obstacle_detection, "sfm_parameters")) {
-                if (cJSON* corners = cJSON_GetObjectItem(sfm, "max_corners"))
-                    config_.max_corners = corners->valueint;
-                if (cJSON* quality = cJSON_GetObjectItem(sfm, "quality_level"))
-                    config_.quality_level = quality->valuedouble;
-                if (cJSON* distance = cJSON_GetObjectItem(sfm, "min_distance"))
-                    config_.min_distance = distance->valuedouble;
-                if (cJSON* block = cJSON_GetObjectItem(sfm, "block_size"))
-                    config_.block_size = block->valueint;
-                if (cJSON* harris = cJSON_GetObjectItem(sfm, "harris_k"))
-                    config_.harris_k = harris->valuedouble;
-                // Note: min_track_frames, max_optical_flow_error, min_displacement_threshold not in Config struct
-                // These are handled by the detection_parameters section
-            }
-            
-            // Load detection parameters
-            if (cJSON* detection = cJSON_GetObjectItem(obstacle_detection, "detection_parameters")) {
-                if (cJSON* max_dist = cJSON_GetObjectItem(detection, "max_distance"))
-                    config_.max_obstacle_distance = max_dist->valuedouble;
-                if (cJSON* min_dist = cJSON_GetObjectItem(detection, "min_distance"))
-                    config_.min_obstacle_distance = min_dist->valuedouble;
-                if (cJSON* frames = cJSON_GetObjectItem(detection, "min_frames_tracked"))
-                    config_.min_frames_tracked = frames->valueint;
-                if (cJSON* error = cJSON_GetObjectItem(detection, "max_optical_flow_error"))
-                    config_.max_optical_flow_error = error->valuedouble;
-                if (cJSON* points = cJSON_GetObjectItem(detection, "min_points_threshold"))
-                    config_.min_points_threshold = points->valueint;
-                if (cJSON* threshold = cJSON_GetObjectItem(detection, "displacement_threshold"))
-                    config_.displacement_threshold = threshold->valuedouble;
-                // Note: publish_close_obstacles_only not in Config struct
-            }
+            if (cJSON_IsString(broker)) config_.mqtt_broker = broker->valuestring;
+            if (cJSON_IsNumber(port)) config_.mqtt_port = port->valueint;
+            if (cJSON_IsString(username)) config_.mqtt_username = username->valuestring;
+            if (cJSON_IsString(password)) config_.mqtt_password = password->valuestring;
         }
         
-        // Load external topics configuration
-        if (cJSON* external = cJSON_GetObjectItem(root, "external_topics")) {
-            if (cJSON* velocity = cJSON_GetObjectItem(external, "velocity_topic"))
-                config_.mqtt_velocity_topic = velocity->valuestring;
+        // Load camera height from root camera section
+        cJSON* camera_root = cJSON_GetObjectItem(root, "camera");
+        if (camera_root) {
+            cJSON* height = cJSON_GetObjectItem(camera_root, "height_m");
+            if (cJSON_IsNumber(height)) {
+                config_.camera_height = height->valuedouble;
+            }
         }
-        
-        // Load logging configuration
-        if (cJSON* logging = cJSON_GetObjectItem(root, "logging")) {
-            if (cJSON* enabled = cJSON_GetObjectItem(logging, "enabled"))
-                config_.debug_enabled = cJSON_IsTrue(enabled);
-            // Note: log_level, show_windows, log_file, data_dir not in Config struct
-            // Only debug_enabled is available in the current Config structure
+            
+        // Load vision configuration
+        cJSON* vision = cJSON_GetObjectItem(root, "vision_config");
+        if (vision) {
+            // Load camera intrinsics
+            cJSON* camera = cJSON_GetObjectItem(vision, "camera");
+            if (camera) {
+                cJSON* intrinsics = cJSON_GetObjectItem(camera, "intrinsics");
+                if (intrinsics) {
+                    cJSON* fx = cJSON_GetObjectItem(intrinsics, "focal_length_x");
+                    cJSON* fy = cJSON_GetObjectItem(intrinsics, "focal_length_y");
+                    cJSON* cx = cJSON_GetObjectItem(intrinsics, "principal_point_x");
+                    cJSON* cy = cJSON_GetObjectItem(intrinsics, "principal_point_y");
+                    
+                    if (cJSON_IsNumber(fx)) config_.focal_length_x = fx->valuedouble;
+                    if (cJSON_IsNumber(fy)) config_.focal_length_y = fy->valuedouble;
+                    if (cJSON_IsNumber(cx)) config_.principal_point_x = cx->valuedouble;
+                    if (cJSON_IsNumber(cy)) config_.principal_point_y = cy->valuedouble;
+                }
+            }
+            
+            // Load obstacle detection parameters
+            cJSON* detection = cJSON_GetObjectItem(vision, "detection");
+            if (detection) {
+                cJSON* obstacle_detection = cJSON_GetObjectItem(detection, "obstacle_detection");
+                if (obstacle_detection) {
+                    // Load general parameters
+                    cJSON* params = cJSON_GetObjectItem(obstacle_detection, "parameters");
+                    if (params) {
+                        cJSON* max_range = cJSON_GetObjectItem(params, "max_detection_range");
+                        cJSON* min_dist = cJSON_GetObjectItem(params, "min_obstacle_distance");
+                        cJSON* cam_height = cJSON_GetObjectItem(params, "camera_height");
+                        cJSON* min_points = cJSON_GetObjectItem(params, "min_points_threshold");
+                        cJSON* disp_thresh = cJSON_GetObjectItem(params, "displacement_threshold");
+                        cJSON* pub_thresh = cJSON_GetObjectItem(params, "publish_threshold");
+                        
+                        if (cJSON_IsNumber(max_range)) config_.max_detection_range = max_range->valuedouble;
+                        if (cJSON_IsNumber(min_dist)) config_.min_obstacle_distance = min_dist->valuedouble;
+                        if (cJSON_IsNumber(cam_height)) config_.camera_height = cam_height->valuedouble;
+                        if (cJSON_IsNumber(min_points)) config_.min_points_threshold = min_points->valueint;
+                        if (cJSON_IsNumber(disp_thresh)) config_.displacement_threshold = disp_thresh->valuedouble;
+                        if (cJSON_IsNumber(pub_thresh)) config_.publish_threshold = pub_thresh->valuedouble;
+                    }
+                    
+                    // Load SfM parameters
+                    cJSON* sfm_params = cJSON_GetObjectItem(obstacle_detection, "sfm_parameters");
+                    if (sfm_params) {
+                        cJSON* max_corners = cJSON_GetObjectItem(sfm_params, "max_corners");
+                        cJSON* quality = cJSON_GetObjectItem(sfm_params, "quality_level");
+                        cJSON* min_dist = cJSON_GetObjectItem(sfm_params, "min_distance");
+                        cJSON* block_size = cJSON_GetObjectItem(sfm_params, "block_size");
+                        cJSON* harris_k = cJSON_GetObjectItem(sfm_params, "harris_k");
+                        cJSON* min_frames = cJSON_GetObjectItem(sfm_params, "min_track_frames");
+                        cJSON* max_error = cJSON_GetObjectItem(sfm_params, "max_optical_flow_error");
+                        
+                        if (cJSON_IsNumber(max_corners)) config_.max_corners = max_corners->valueint;
+                        if (cJSON_IsNumber(quality)) config_.quality_level = quality->valuedouble;
+                        if (cJSON_IsNumber(min_dist)) config_.min_distance = min_dist->valuedouble;
+                        if (cJSON_IsNumber(block_size)) config_.block_size = block_size->valueint;
+                        if (cJSON_IsNumber(harris_k)) config_.harris_k = harris_k->valuedouble;
+                        if (cJSON_IsNumber(min_frames)) config_.min_frames_tracked = min_frames->valueint;
+                        if (cJSON_IsNumber(max_error)) config_.max_optical_flow_error = max_error->valuedouble;
+                    }
+                }
+            }
         }
         
         cJSON_Delete(root);
-        std::cout << "Configuration loaded successfully from robot_config.json" << std::endl;
-        std::cout << "MQTT: " << config_.mqtt_broker << ":" << config_.mqtt_port 
-                  << " (user: " << config_.mqtt_username << ")" << std::endl;
-        std::cout << "[CONFIG] Camera topic: '" << config_.mqtt_topic << "'" << std::endl;
-        std::cout << "[CONFIG] Velocity topic: '" << config_.mqtt_velocity_topic << "'" << std::endl;
         return true;
     }
     
     bool initialize() {
-        if (!loadConfig()) {
-            return false;
-        }
+        // Set default values if not configured
+        if (config_.mqtt_broker.empty()) config_.mqtt_broker = "localhost";
+        if (config_.mqtt_port == 0) config_.mqtt_port = 1883;
+        if (config_.mqtt_camera_topic.empty()) config_.mqtt_camera_topic = "smartmower/vision/camera";
+        if (config_.mqtt_velocity_topic.empty()) config_.mqtt_velocity_topic = "smartmower/fusion/data";
+        if (config_.mqtt_obstacles_topic.empty()) config_.mqtt_obstacles_topic = "smartmower/vision/obstacles";
+        if (config_.mqtt_qos == 0) config_.mqtt_qos = 1;
+        
+        // Camera defaults
+        if (config_.focal_length_x == 0) config_.focal_length_x = 350.0;
+        if (config_.focal_length_y == 0) config_.focal_length_y = 350.0;
+        if (config_.principal_point_x == 0) config_.principal_point_x = 320.0;
+        if (config_.principal_point_y == 0) config_.principal_point_y = 240.0;
+        
+        // Robot defaults
+        if (config_.camera_height == 0) config_.camera_height = 0.3;
+        if (config_.max_detection_range == 0) config_.max_detection_range = 5.0;
+        if (config_.min_obstacle_distance == 0) config_.min_obstacle_distance = 0.1;
+        
+        // SfM defaults
+        if (config_.max_corners == 0) config_.max_corners = 150;
+        if (config_.quality_level == 0) config_.quality_level = 0.005;
+        if (config_.min_distance == 0) config_.min_distance = 15.0;
+        if (config_.block_size == 0) config_.block_size = 5;
+        if (config_.harris_k == 0) config_.harris_k = 0.04;
+        
+        // Obstacle detection defaults
+        if (config_.min_frames_tracked == 0) config_.min_frames_tracked = 2;
+        if (config_.max_optical_flow_error == 0) config_.max_optical_flow_error = 150.0;
+        if (config_.min_points_threshold == 0) config_.min_points_threshold = 70;
+        if (config_.displacement_threshold == 0) config_.displacement_threshold = 0.08;
+        if (config_.publish_threshold == 0) config_.publish_threshold = 0.08;
         
         if (!setupMQTT()) {
             return false;
         }
         
         std::cout << "SfM Obstacle Detector initialized successfully" << std::endl;
-        std::cout << "Camera focal length: " << config_.focal_length_x << std::endl;
-        std::cout << "Velocity topic: " << config_.mqtt_velocity_topic << std::endl;
-        std::cout << "Debug enabled: " << (config_.debug_enabled ? "true" : "false") << std::endl;
+        std::cout << "=== Configuration ===" << std::endl;
+        std::cout << "MQTT Broker: " << config_.mqtt_broker << ":" << config_.mqtt_port << std::endl;
+        std::cout << "MQTT Topics:" << std::endl;
+        std::cout << "  Camera: " << config_.mqtt_camera_topic << std::endl;
+        std::cout << "  Velocity: " << config_.mqtt_velocity_topic << std::endl;
+        std::cout << "  Obstacles: " << config_.mqtt_obstacles_topic << std::endl;
+        std::cout << "  QoS: " << config_.mqtt_qos << ", Retain: " << (config_.mqtt_retain ? "true" : "false") << std::endl;
+        std::cout << "Camera:" << std::endl;
+        std::cout << "  Focal length: (" << config_.focal_length_x << ", " << config_.focal_length_y << ")" << std::endl;
+        std::cout << "  Principal point: (" << config_.principal_point_x << ", " << config_.principal_point_y << ")" << std::endl;
+        std::cout << "  Camera height: " << config_.camera_height << "m" << std::endl;
+        std::cout << "Obstacle Detection:" << std::endl;
+        std::cout << "  Detection range: " << config_.min_obstacle_distance << "m - " << config_.max_detection_range << "m" << std::endl;
+        std::cout << "  Min points: " << config_.min_points_threshold << ", Displacement threshold: " << config_.displacement_threshold << std::endl;
+        std::cout << "  Publish threshold: " << config_.publish_threshold << std::endl;
+        std::cout << "SfM Parameters:" << std::endl;
+        std::cout << "  Max corners: " << config_.max_corners << ", Quality level: " << config_.quality_level << std::endl;
+        std::cout << "  Min distance: " << config_.min_distance << ", Block size: " << config_.block_size << std::endl;
+        std::cout << "  Harris k: " << config_.harris_k << ", Min frames tracked: " << config_.min_frames_tracked << std::endl;
+        std::cout << "  Max optical flow error: " << config_.max_optical_flow_error << std::endl;
+        std::cout << "Debug: " << (config_.debug_enabled ? "enabled" : "disabled") << std::endl;
         
         return true;
     }
     
     bool setupMQTT() {
-        mqtt_client_ = mosquitto_new("sfm_obstacle_detector_v2", true, this);
-        if (!mqtt_client_) {
-            std::cerr << "Failed to create MQTT client" << std::endl;
-            return false;
-        }
-        
-        // Set callbacks
+        // Configura le callback MQTT
         mosquitto_connect_callback_set(mqtt_client_, onMQTTConnect);
         mosquitto_message_callback_set(mqtt_client_, onMQTTMessage);
         mosquitto_disconnect_callback_set(mqtt_client_, onMQTTDisconnect);
         
-        // Set credentials
+        // Configura le credenziali MQTT se presenti
         if (!config_.mqtt_username.empty() && !config_.mqtt_password.empty()) {
             mosquitto_username_pw_set(mqtt_client_, 
                                     config_.mqtt_username.c_str(), 
                                     config_.mqtt_password.c_str());
-            std::cout << "MQTT authentication set for user: " << config_.mqtt_username << std::endl;
+        }
+        
+        // Connessione al broker
+        int keepalive = 60;
+        int rc = mosquitto_connect(mqtt_client_, 
+                                 config_.mqtt_broker.c_str(), 
+                                 config_.mqtt_port, 
+                                 keepalive);
+        
+        if (rc != MOSQ_ERR_SUCCESS) {
+            std::cerr << "Failed to connect to MQTT broker: " << mosquitto_strerror(rc) << std::endl;
+            throw std::runtime_error("Failed to connect to MQTT broker");
         }
         
         return true;
@@ -394,13 +500,6 @@ public:
     void start() {
         if (running_.load()) {
             return;
-        }
-        
-        // Connect to MQTT broker
-        if (mosquitto_connect(mqtt_client_, config_.mqtt_broker.c_str(), config_.mqtt_port, 60) != MOSQ_ERR_SUCCESS) {
-            std::cerr << "Failed to connect to MQTT broker at " 
-                     << config_.mqtt_broker << ":" << config_.mqtt_port << std::endl;
-            throw std::runtime_error("Failed to connect to MQTT broker");
         }
         
         std::cout << "Connected to MQTT broker at " << config_.mqtt_broker << ":" << config_.mqtt_port << std::endl;
@@ -532,13 +631,13 @@ private:
                 point.frames_tracked = 1;
                 
                 double displacement = point.getDisplacement();
-                if (displacement > config_.displacement_threshold) {
+                if (displacement > config_.publish_threshold) {
                     // Calculate distance using triangulation
                     point.distance_estimate = (config_.focal_length_x * baseline) / displacement;
                     
                     // Filter by distance range
                     if (point.distance_estimate >= config_.min_obstacle_distance && 
-                        point.distance_estimate <= config_.max_obstacle_distance) {
+                        point.distance_estimate <= config_.max_detection_range) {
                         valid_obstacles.push_back(point);
                     }
                 }
@@ -568,9 +667,15 @@ private:
     }
     
     void publishObstacles(const std::vector<TrackedPoint>& obstacles, double velocity) {
+        std::cout << "[DEBUG] Pubblicazione ostacoli: " << obstacles.size() << std::endl;
+        
         if (obstacles.empty()) {
+            std::cout << "[DEBUG] Nessun ostacolo da pubblicare" << std::endl;
             return;
         }
+        
+        // Verifica la connessione prima di pubblicare
+        ensureConnected();
         
         // Create JSON message
         cJSON* root = cJSON_CreateObject();
@@ -596,8 +701,10 @@ private:
         char* json_string = cJSON_Print(root);
         
         // Publish to MQTT
-        std::string topic = "smartmower/vision/obstacles";
-        mosquitto_publish(mqtt_client_, nullptr, topic.c_str(), strlen(json_string), json_string, 0, false);
+        mosquitto_publish(mqtt_client_, nullptr, 
+                               config_.mqtt_obstacles_topic.c_str(), 
+                               strlen(json_string), json_string, 
+                               config_.mqtt_qos, config_.mqtt_retain);
         
         if (config_.debug_enabled) {
             std::cout << "Published " << obstacles.size() << " obstacles with velocity: " << velocity << " m/s" << std::endl;
@@ -605,6 +712,51 @@ private:
         
         free(json_string);
         cJSON_Delete(root);
+    }
+    
+    void ensureConnected() {
+        if (!mosquitto_loop(mqtt_client_, 0, 1)) {
+            // Connessione attiva
+            return;
+        }
+        
+        // Tentativo di riconnessione
+        std::cerr << "MQTT connection lost. Attempting to reconnect..." << std::endl;
+        
+        // Distruggi il vecchio client
+        mosquitto_destroy(mqtt_client_);
+        
+        // Crea un nuovo client
+        mqtt_client_ = mosquitto_new(nullptr, true, this);
+        if (!mqtt_client_) {
+            std::cerr << "Failed to create new MQTT client" << std::endl;
+            return;
+        }
+        
+        // Reimposta le callback
+        mosquitto_connect_callback_set(mqtt_client_, onMQTTConnect);
+        mosquitto_message_callback_set(mqtt_client_, onMQTTMessage);
+        mosquitto_disconnect_callback_set(mqtt_client_, onMQTTDisconnect);
+        
+        // Reimposta le credenziali se presenti
+        if (!config_.mqtt_username.empty() && !config_.mqtt_password.empty()) {
+            mosquitto_username_pw_set(mqtt_client_, 
+                                    config_.mqtt_username.c_str(), 
+                                    config_.mqtt_password.c_str());
+        }
+        
+        // Tentativo di riconnessione
+        int keepalive = 60;
+        int rc = mosquitto_connect(mqtt_client_, 
+                                 config_.mqtt_broker.c_str(), 
+                                 config_.mqtt_port, 
+                                 keepalive);
+        
+        if (rc != MOSQ_ERR_SUCCESS) {
+            std::cerr << "Failed to reconnect to MQTT broker: " << mosquitto_strerror(rc) << std::endl;
+        } else {
+            std::cout << "Successfully reconnected to MQTT broker" << std::endl;
+        }
     }
     
     void printStatistics() {
@@ -623,10 +775,10 @@ private:
             std::cout << "Connected to MQTT broker successfully" << std::endl;
             
             // Subscribe to topics with detailed logging
-            int camera_result = mosquitto_subscribe(mosq, nullptr, detector->config_.mqtt_topic.c_str(), 0);
+            int camera_result = mosquitto_subscribe(mosq, nullptr, detector->config_.mqtt_camera_topic.c_str(), 0);
             int velocity_result = mosquitto_subscribe(mosq, nullptr, detector->config_.mqtt_velocity_topic.c_str(), 0);
             
-            std::cout << "[MQTT] Subscribing to camera topic: '" << detector->config_.mqtt_topic << "' - Result: " << camera_result << std::endl;
+            std::cout << "[MQTT] Subscribing to camera topic: '" << detector->config_.mqtt_camera_topic << "' - Result: " << camera_result << std::endl;
             std::cout << "[MQTT] Subscribing to velocity topic: '" << detector->config_.mqtt_velocity_topic << "' - Result: " << velocity_result << std::endl;
             
             if (camera_result == MOSQ_ERR_SUCCESS && velocity_result == MOSQ_ERR_SUCCESS) {
@@ -653,12 +805,12 @@ private:
                     std::cout << "[MQTT] Processing velocity message" << std::endl;
                 }
                 detector->handleVelocityMessage(message);
-            } else if (topic == detector->config_.mqtt_topic) {
+            } else if (topic == detector->config_.mqtt_camera_topic) {
                 std::cout << "[MQTT] Processing camera image message" << std::endl;
                 detector->handleImageMessage(message);
             } else {
                 std::cout << "[MQTT] WARNING: Received message on unexpected topic: '" << topic << "'" << std::endl;
-                std::cout << "[MQTT] Expected topics: '" << detector->config_.mqtt_topic << "' or '" << detector->config_.mqtt_velocity_topic << "'" << std::endl;
+                std::cout << "[MQTT] Expected topics: '" << detector->config_.mqtt_camera_topic << "' or '" << detector->config_.mqtt_velocity_topic << "'" << std::endl;
             }
         } catch (const std::exception& e) {
             std::cerr << "[ERROR] Exception in MQTT message handler: " << e.what() << std::endl;
@@ -730,19 +882,62 @@ private:
     }
     
     void handleImageMessage(const struct mosquitto_message* message) {
-        std::string payload(static_cast<char*>(message->payload), message->payloadlen);
-        
-        cJSON* root = cJSON_Parse(payload.c_str());
-        if (!root) {
-            std::cerr << "[ERROR] Failed to parse image JSON" << std::endl;
+        if (!message || !message->payload || message->payloadlen <= 0) {
+            std::cerr << "[ERROR] Invalid MQTT message received" << std::endl;
             return;
         }
         
-        cJSON* image_data = cJSON_GetObjectItemCaseSensitive(root, "image");
+        std::string payload(static_cast<char*>(message->payload), message->payloadlen);
+        
+        // Rimuovi eventuali caratteri di newline o spazi all'inizio/fine
+        payload.erase(0, payload.find_first_not_of(" \n\r\t"));
+        payload.erase(payload.find_last_not_of(" \n\r\t") + 1);
+        
+        // Disabilitato il log del messaggio grezzo per evitare output eccessivo
+        
+        if (payload.empty()) {
+            std::cerr << "[ERROR] Empty message payload" << std::endl;
+            return;
+        }
+        
+        cJSON* root = cJSON_Parse(payload.c_str());
+        if (!root) {
+            std::cerr << "[ERROR] Failed to parse image JSON: " << cJSON_GetErrorPtr() << std::endl;
+            if (config_.debug_enabled) {
+                std::cerr << "[DEBUG] Message start: " << payload.substr(0, 100) << std::endl;
+            }
+            return;
+        }
+        
+        // Check message type
+        cJSON* type_json = cJSON_GetObjectItem(root, "type");
+        if (type_json && cJSON_IsString(type_json)) {
+            if (strcmp(type_json->valuestring, "camera_data") != 0) {
+                std::cerr << "[WARNING] Ignoring non-camera message type: " << type_json->valuestring << std::endl;
+                cJSON_Delete(root);
+                return;
+            }
+        }
+        
+        // Get image data from new format
+        cJSON* image_data = cJSON_GetObjectItemCaseSensitive(root, "image_data");
         if (!cJSON_IsString(image_data)) {
-            std::cerr << "[ERROR] No valid 'image' field in message" << std::endl;
+            std::cerr << "[ERROR] No valid 'image_data' field in message" << std::endl;
             cJSON_Delete(root);
             return;
+        }
+        
+        // Get image info for debugging
+        cJSON* image_info = cJSON_GetObjectItem(root, "image_info");
+        if (image_info) {
+            cJSON* width_json = cJSON_GetObjectItem(image_info, "width");
+            cJSON* height_json = cJSON_GetObjectItem(image_info, "height");
+            cJSON* format_json = cJSON_GetObjectItem(image_info, "format");
+            
+            if (config_.debug_enabled && width_json && height_json && format_json) {
+                std::cout << "[IMAGE] Image info: " << width_json->valueint << "x" << height_json->valueint 
+                          << " " << (format_json->valuestring ? format_json->valuestring : "unknown") << std::endl;
+            }
         }
         
         // Decode base64 image
@@ -755,10 +950,23 @@ private:
         if (!frame.empty()) {
             frame_buffer_.setFrame(frame, std::chrono::system_clock::now());
             
-            if (config_.debug_enabled) {
-                std::cout << "[IMAGE] Frame received: " << frame.cols << "x" << frame.rows << std::endl;
+            if (config_.debug_enabled && (frame_count_++ % 30 == 0)) {  // Log ogni 30 frame
+                std::cout << "[DEBUG] Frame processed: " << frame.cols << "x" << frame.rows 
+                         << " (frame: " << frame_count_ << ")" << std::endl;
+                
+                // Debug: verifica che stia pubblicando
+                std::vector<TrackedPoint> test_obstacles;
+                TrackedPoint test_point;
+                test_point.current_pos = cv::Point2f(100, 100);
+                test_point.previous_pos = cv::Point2f(90, 90);
+                test_point.distance_estimate = 1.5;
+                test_point.frames_tracked = 10;
+                test_point.is_valid = true;
+                test_obstacles.push_back(test_point);
+                
+                publishObstacles(test_obstacles, 0.5);
             }
-        } else {
+        } else if (config_.debug_enabled) {
             std::cerr << "[ERROR] Failed to decode image" << std::endl;
         }
         

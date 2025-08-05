@@ -1,4 +1,81 @@
 {
+  "mqtt": {
+    "broker": "localhost",
+    "port": 1883,
+    "username": "mower",
+    "password": "smart",
+    "topics": {
+      "camera": {
+        "base": "vision/camera",
+        "subtopics": {
+          "frame": "frame",
+          "status": "status",
+          "commands": "commands",
+          "heartbeat": "heartbeat"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "obstacle": {
+        "base": "vision/obstacle",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status",
+          "obstacles": "obstacles"
+        },
+        "publish_threshold": 0.08,
+        "qos": 1,
+        "retain": false
+      },
+      "perimeter": {
+        "base": "vision/perimeter",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "grass": {
+        "base": "vision/grass",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "gps": {
+        "base": "smartmower/gps",
+        "subtopics": {
+          "data": "data",
+          "status": "status",
+          "heartbeat": "heartbeat",
+          "commands": "cmd"
+        },
+        "qos": 1,
+        "retain": false,
+        "keepalive": 60
+      },
+      "pico": {
+        "base": "pico",
+        "subtopics": {
+          "sensors": "sensors",
+          "odometry": "odometry",
+          "status": "status",
+          "heartbeat": "heartbeat",
+          "commands": {
+            "motors": "cmd/motors",
+            "system": "cmd/system"
+          }
+        },
+        "qos": 1,
+        "retain": false,
+        "keepalive": 60,
+        "client_id": "pico_bridge"
+      }
+    }
+  },
   "metadata": {
     "config_version": "1.0",
     "robot_id": "smartmower_001",
@@ -434,14 +511,6 @@
     }
   },
   "system": {
-    "communication": {
-      "mqtt_broker_host": "192.168.100.61",
-      "mqtt_broker_port": 1883,
-      "mqtt_username": "mower",
-      "mqtt_password": "smart",
-      "device_id": "smartmower_001",
-      "telemetry_interval": 5
-    },
     "safety": {
       "emergency_stop_enabled": true,
       "lift_sensor_enabled": true,
@@ -603,100 +672,115 @@
     "save_map_interval_s": 60,
     "map_save_path": "/opt/smartmower/data/slam/maps/"
   },
+  "gps_config": {
+    "uart_device": "/dev/ttyAMA2",
+    "baudrate": 115200,
+    "uart_timeout_ms": 1000,
+    "protocol": "NMEA",
+    "max_satellites": 24,
+    "log_raw_data": false
+  },
+  "gps_logging": {
+    "level": "info",
+    "file": "/opt/smartmower/log/gps_bridge.log",
+    "max_size_mb": 10,
+    "max_files": 5
+  },
   "vision_config": {
     "camera": {
-      "common": {
-        "width": 640,
-        "height": 480,
-        "fps": 15
-      },
-      "usb": {
-        "type": "usb",
-        "device": "/dev/video0"
-      },
-      "rpi": {
-        "type": "rpi",
-        "rotation": 0,
-        "jpeg_quality": 80,
-        "hdr": true,
-        "denoise": true
-      }
-    },
-    "grass_detection": {
-      "camera": {
-        "focal_length": 600.0,
-        "height_cm": 30.0
-      },
-      "parameters": {
-        "grass_low_h": 30,
-        "grass_high_h": 90,
-        "min_saturation": 40,
-        "min_value": 40,
-        "min_grass_area": 100
-      }
-    },
-    "obstacle_detection": {
-      "robot": {
-        "camera_height": 0.3,
-        "max_detection_range": 5.0
-      },
-      "camera": {
+      "device": "/dev/video0",
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "rotation": 0,
+      "flip": "none",
+      "height_m": 0.3,
+      "intrinsics": {
         "focal_length_x": 350.0,
         "focal_length_y": 350.0,
         "principal_point_x": 320.0,
         "principal_point_y": 240.0,
-        "width": 640,
-        "height": 480
-      },
-      "sfm_parameters": {
-        "max_corners": 150,
-        "quality_level": 0.005,
-        "min_distance": 15,
-        "block_size": 5,
-        "harris_k": 0.04,
-        "min_track_frames": 2,
-        "max_optical_flow_error": 100.0,
-        "min_displacement_threshold": 0.1
-      },
-      "detection_parameters": {
-        "min_obstacle_height": 0.05,
-        "max_obstacle_height": 2.0,
-        "obstacle_confidence_threshold": 0.7
+        "focal_length": 600.0
       }
     },
-    "perimeter_detection": {
-      "line_detection": {
-        "hough_threshold": 50,
-        "min_line_length": 30,
-        "max_line_gap": 10
+    "detection": {
+      "obstacle_detection": {
+        "parameters": {
+          "max_detection_range": 5.0,
+          "min_obstacle_distance": 0.1,
+          "min_obstacle_height": 0.05,
+          "max_obstacle_height": 2.0,
+          "confidence_threshold": 0.7,
+          "min_points_threshold": 70,
+          "displacement_threshold": 0.08,
+          "publish_threshold": 0.08,
+          "debug_enabled": false
+        },
+        "sfm_parameters": {
+          "max_corners": 150,
+          "quality_level": 0.005,
+          "min_distance": 15.0,
+          "block_size": 5,
+          "harris_k": 0.04,
+          "min_track_frames": 2,
+          "max_optical_flow_error": 100.0
+        }
       },
-      "color_detection": {
-        "wire_color_low": [0, 0, 100],
-        "wire_color_high": [180, 30, 255]
+      "perimeter_detection": {
+        "detection_parameters": {
+          "min_contour_area": 50,
+          "threshold_value": 50,
+          "blur_size": 3,
+          "erode_iterations": 1,
+          "dilate_iterations": 1,
+          "hough_threshold": 50,
+          "min_line_length": 30,
+          "max_line_gap": 10
+        },
+        "color_detection": {
+          "wire_color_low": [0, 0, 100],
+          "wire_color_high": [180, 30, 255]
+        },
+        "validation": {
+          "min_wire_segments": 2,
+          "max_wire_distance": 1.5
+        },
+        "distance_thresholds": {
+          "warning_distance_m": 1.5,
+          "alert_distance_m": 0.8,
+          "max_distance_m": 5.0
+        }
       },
-      "validation": {
-        "min_wire_segments": 2,
-        "max_wire_distance": 1.5
+      "grass_detection": {
+        "parameters": {
+          "grass_low_h": 30,
+          "grass_high_h": 90,
+          "min_saturation": 40,
+          "min_value": 40,
+          "min_grass_area": 100
+        },
+        "height": 5.0,
+        "density": "medium"
       }
     }
   },
   "vision_logging": {
     "level": "info",
-    "file": "/opt/smartmower/log/vision.log",
-    "data_dir": "/opt/smartmower/data/vision",
+    "enabled": true,
+    "show_windows": true,
     "camera": {
       "file": "/opt/smartmower/log/vision_camera.log",
       "data_dir": "/opt/smartmower/data/vision/camera"
     },
-    "grass": {
+    "grass_detection": {
       "file": "/opt/smartmower/log/vision_grass.log",
       "data_dir": "/opt/smartmower/data/vision/grass"
     },
-    "obstacle": {
+    "obstacle_detection": {
       "file": "/opt/smartmower/log/vision_obstacle.log",
       "data_dir": "/opt/smartmower/data/vision/obstacle"
     },
-    "perimeter": {
+    "perimeter_detection": {
       "file": "/opt/smartmower/log/vision_perimeter.log",
       "data_dir": "/opt/smartmower/data/vision/perimeter"
     }
@@ -803,17 +887,16 @@
     "backup_count": 5,
     "console_output": true
   },
-  "modules": {
-    "vision": {
-      "camera": {
-        "rpi_camera": {
-          "resolution_width": 1296,
-          "resolution_height": 972,
-          "fps": 30,
-          "rotation": 0,
-          "jpeg_quality": 80
-        }
-      }
-    }
+  "pico_config": {
+    "uart_device": "/dev/ttyAMA1",
+    "baudrate": 115200,
+    "uart_timeout_ms": 1000,
+    "battery_profile": "battery_24v_lipo"
+  },
+  "pico_logging": {
+    "level": "info",
+    "file": "/opt/smartmower/log/pico_bridge.log",
+    "max_size_mb": 10,
+    "max_files": 5
   }
 }

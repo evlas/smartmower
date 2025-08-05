@@ -29,20 +29,45 @@
 #define DEFAULT_BAUDRATE B9600
 #define DEFAULT_BUFFER_SIZE 1024
 
+// Timing constants
+#define HEARTBEAT_INTERVAL 5  // seconds
+
+// GPS defaults
+#define DEFAULT_GPS_DEVICE "/dev/ttyAMA2"
+#define DEFAULT_BAUDRATE_NUM 115200
+#define DEFAULT_TIMEOUT_MS 1000
+#define DEFAULT_PROTOCOL "NMEA"
+#define DEFAULT_MAX_SATELLITES 24
+
+// MQTT topic configuration
+typedef struct {
+    char base[256];
+    struct {
+        char data[64];
+        char status[64];
+        char heartbeat[64];
+        char commands[64];
+    } subtopics;
+    int qos;
+    bool retain;
+    int keepalive;
+} mqtt_config_t;
+
 // Configuration structure
 typedef struct {
     // GPS device configuration
     char gps_device[256];
     int baudrate;
     int timeout;
+    char protocol[32];
+    int max_satellites;
     
     // MQTT configuration
+    mqtt_config_t mqtt;
     char mqtt_host[256];
     int mqtt_port;
     char mqtt_username[256];
     char mqtt_password[256];
-    char base_topic[256];
-    int keepalive;
     
     // Logging configuration
     int log_level;
@@ -153,8 +178,12 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
     
     printf("Starting GPS Bridge with config: %s\n", config_file);
-    printf("GPS: %s @ %d baud\n", config.gps_device, config.baudrate);
-    printf("MQTT: %s:%d, topic: %s\n", config.mqtt_host, config.mqtt_port, config.base_topic);
+    printf("GPS Device: %s\n", config.gps_device);
+    printf("Baudrate: %d\n", config.baudrate);
+    printf("Protocol: %s, Max Satellites: %d\n", config.protocol, config.max_satellites);
+    printf("MQTT: %s:%d, Base Topic: %s\n", 
+           config.mqtt_host, config.mqtt_port, config.mqtt.base);
+    printf("Log level: %d, log file: %s\n", config.log_level, config.log_file);
     
     // Initialize GPS serial port
     gps_fd = init_serial(config.gps_device, config.baudrate);
@@ -190,7 +219,7 @@ int main(int argc, char *argv[]) {
         time_t now = time(NULL);
         
         // Publish heartbeat using header constant
-        if (now - last_heartbeat >= GPS_HEARTBEAT_INTERVAL_SEC) {
+        if (now - last_heartbeat >= HEARTBEAT_INTERVAL) {
             publish_gps_heartbeat();
             last_heartbeat = now;
         }
@@ -230,18 +259,31 @@ void init_gps_data(void) {
 // Configuration loading from centralized robot_config.json
 int load_config(const char *filename, config_t *config) {
     // Set defaults
-    strcpy(config->base_topic, GPS_MQTT_BASE_TOPIC);
     strcpy(config->gps_device, "/dev/ttyAMA2");
     config->baudrate = 115200;
     config->timeout = 1000;
+    strcpy(config->protocol, "NMEA");
+    config->max_satellites = 24;
+    
+    // Default MQTT settings
     strcpy(config->mqtt_host, "localhost");
     config->mqtt_port = 1883;
-    config->keepalive = 60;
+    strcpy(config->mqtt_username, "");
+    strcpy(config->mqtt_password, "");
+    
+    // Default MQTT topics
+    strcpy(config->mqtt.base, "smartmower/gps");
+    strcpy(config->mqtt.subtopics.data, "data");
+    strcpy(config->mqtt.subtopics.status, "status");
+    strcpy(config->mqtt.subtopics.heartbeat, "heartbeat");
+    strcpy(config->mqtt.subtopics.commands, "cmd");
+    config->mqtt.qos = 1;
+    config->mqtt.retain = false;
+    config->mqtt.keepalive = 60;
+    
+    // Logging defaults
     config->log_level = 1;
-    strcpy(config->log_file, "gps_bridge.log");
-    // Initialize MQTT credentials to empty
-    config->mqtt_username[0] = '\0';
-    config->mqtt_password[0] = '\0';
+    strcpy(config->log_file, "/var/log/gps_bridge.log");
     
     FILE *file = fopen(filename, "r");
     if (!file) {
@@ -262,7 +304,7 @@ int load_config(const char *filename, config_t *config) {
     if (gps_config) {
         json_t *device = json_object_get(gps_config, "uart_device");
         if (device && json_is_string(device)) {
-            strcpy(config->gps_device, json_string_value(device));
+            strncpy(config->gps_device, json_string_value(device), sizeof(config->gps_device) - 1);
         }
         
         json_t *baudrate = json_object_get(gps_config, "baudrate");
@@ -277,12 +319,72 @@ int load_config(const char *filename, config_t *config) {
         
         json_t *protocol = json_object_get(gps_config, "protocol");
         if (protocol && json_is_string(protocol)) {
-            printf("GPS Protocol: %s\n", json_string_value(protocol));
+            strncpy(config->protocol, json_string_value(protocol), sizeof(config->protocol) - 1);
         }
         
         json_t *max_satellites = json_object_get(gps_config, "max_satellites");
         if (max_satellites && json_is_integer(max_satellites)) {
-            printf("GPS Max Satellites: %lld\n", (long long)json_integer_value(max_satellites));
+            config->max_satellites = json_integer_value(max_satellites);
+        }
+    }
+    
+    // Parse MQTT topics from configuration
+    json_t *mqtt = json_object_get(root, "mqtt");
+    if (mqtt) {
+        json_t *topics = json_object_get(mqtt, "topics");
+        if (topics) {
+            json_t *gps = json_object_get(topics, "gps");
+            if (gps) {
+                // Base topic
+                json_t *base = json_object_get(gps, "base");
+                if (base && json_is_string(base)) {
+                    strncpy(config->mqtt.base, json_string_value(base), sizeof(config->mqtt.base) - 1);
+                }
+                
+                // Subtopics
+                json_t *subtopics = json_object_get(gps, "subtopics");
+                if (subtopics) {
+                    json_t *data = json_object_get(subtopics, "data");
+                    if (data && json_is_string(data)) {
+                        strncpy(config->mqtt.subtopics.data, json_string_value(data), 
+                               sizeof(config->mqtt.subtopics.data) - 1);
+                    }
+                    
+                    json_t *status = json_object_get(subtopics, "status");
+                    if (status && json_is_string(status)) {
+                        strncpy(config->mqtt.subtopics.status, json_string_value(status),
+                               sizeof(config->mqtt.subtopics.status) - 1);
+                    }
+                    
+                    json_t *heartbeat = json_object_get(subtopics, "heartbeat");
+                    if (heartbeat && json_is_string(heartbeat)) {
+                        strncpy(config->mqtt.subtopics.heartbeat, json_string_value(heartbeat),
+                               sizeof(config->mqtt.subtopics.heartbeat) - 1);
+                    }
+                    
+                    json_t *commands = json_object_get(subtopics, "commands");
+                    if (commands && json_is_string(commands)) {
+                        strncpy(config->mqtt.subtopics.commands, json_string_value(commands),
+                               sizeof(config->mqtt.subtopics.commands) - 1);
+                    }
+                }
+                
+                // QoS and retain
+                json_t *qos = json_object_get(gps, "qos");
+                if (qos && json_is_integer(qos)) {
+                    config->mqtt.qos = json_integer_value(qos);
+                }
+                
+                json_t *retain = json_object_get(gps, "retain");
+                if (retain && json_is_boolean(retain)) {
+                    config->mqtt.retain = json_boolean_value(retain);
+                }
+                
+                json_t *keepalive = json_object_get(gps, "keepalive");
+                if (keepalive && json_is_integer(keepalive)) {
+                    config->mqtt.keepalive = json_integer_value(keepalive);
+                }
+            }
         }
     }
     
@@ -306,49 +408,30 @@ int load_config(const char *filename, config_t *config) {
         }
     }
     
-    // Parse configuration from tuning section
-    json_t *tuning = json_object_get(root, "tuning");
-    if (tuning) {
-        
-        // Parse communication parameters for MQTT
-        json_t *comm = json_object_get(tuning, "communication_parameters");
-        if (comm) {
-            json_t *port = json_object_get(comm, "mqtt_port");
-            if (json_is_integer(port)) {
-                config->mqtt_port = json_integer_value(port);
-            }
-            
-            json_t *keepalive = json_object_get(comm, "mqtt_keepalive");
-            if (json_is_integer(keepalive)) {
-                config->keepalive = json_integer_value(keepalive);
-            }
+    // Load MQTT broker configuration
+    json_t *mqtt_broker = json_object_get(root, "mqtt");
+    if (mqtt_broker) {
+        // MQTT broker settings
+        json_t *broker = json_object_get(mqtt_broker, "broker");
+        if (json_is_string(broker)) {
+            strncpy(config->mqtt_host, json_string_value(broker), sizeof(config->mqtt_host) - 1);
         }
-    }
-    
-    // Parse MQTT credentials from system.communication section
-    json_t *system = json_object_get(root, "system");
-    if (system) {
-        json_t *communication = json_object_get(system, "communication");
-        if (communication) {
-            json_t *mqtt_host = json_object_get(communication, "mqtt_broker_host");
-            if (mqtt_host && json_is_string(mqtt_host)) {
-                strcpy(config->mqtt_host, json_string_value(mqtt_host));
-            }
-            
-            json_t *mqtt_port = json_object_get(communication, "mqtt_broker_port");
-            if (mqtt_port && json_is_integer(mqtt_port)) {
-                config->mqtt_port = json_integer_value(mqtt_port);
-            }
-            
-            json_t *mqtt_username = json_object_get(communication, "mqtt_username");
-            if (mqtt_username && json_is_string(mqtt_username)) {
-                strcpy(config->mqtt_username, json_string_value(mqtt_username));
-            }
-            
-            json_t *mqtt_password = json_object_get(communication, "mqtt_password");
-            if (mqtt_password && json_is_string(mqtt_password)) {
-                strcpy(config->mqtt_password, json_string_value(mqtt_password));
-            }
+        
+        json_t *port = json_object_get(mqtt_broker, "port");
+        if (json_is_integer(port)) {
+            config->mqtt_port = json_integer_value(port);
+        }
+        
+        json_t *username = json_object_get(mqtt_broker, "username");
+        if (json_is_string(username)) {
+            strncpy(config->mqtt_username, json_string_value(username), 
+                   sizeof(config->mqtt_username) - 1);
+        }
+        
+        json_t *password = json_object_get(mqtt_broker, "password");
+        if (json_is_string(password)) {
+            strncpy(config->mqtt_password, json_string_value(password), 
+                   sizeof(config->mqtt_password) - 1);
         }
     }
     
@@ -408,7 +491,33 @@ int init_serial(const char *device, int baudrate) {
 int init_mqtt(config_t *config) {
     mosquitto_lib_init();
     
-    mosq = mosquitto_new(GPS_MQTT_CLIENT_ID, true, NULL);
+    // Use hostname as client ID if available, otherwise use default
+    char client_id[256];
+    char hostname[256];
+    
+    // Initialize with default client ID
+    const char *default_id = "gps_bridge";
+    strncpy(client_id, default_id, sizeof(client_id) - 1);
+    client_id[sizeof(client_id) - 1] = '\0';
+    
+    // Try to get hostname and append it if successful
+    if (gethostname(hostname, sizeof(hostname) - 1) == 0) {
+        hostname[sizeof(hostname) - 1] = '\0';  // Ensure null termination
+        
+        // Calculate available space after prefix (leave room for '_' and null terminator)
+        const char *prefix = "gps_bridge_";
+        size_t prefix_len = strlen(prefix);
+        size_t max_hostname_len = sizeof(client_id) - prefix_len - 1;  // -1 for null terminator
+        
+        // Copy prefix
+        strncpy(client_id, prefix, sizeof(client_id) - 1);
+        
+        // Safely append hostname, truncating if necessary
+        strncat(client_id, hostname, max_hostname_len);
+        client_id[sizeof(client_id) - 1] = '\0';  // Ensure null termination
+    }
+    
+    mosq = mosquitto_new(client_id, true, NULL);
     if (!mosq) {
         fprintf(stderr, "Failed to create mosquitto client\n");
         return -1;
@@ -421,15 +530,25 @@ int init_mqtt(config_t *config) {
     
     mosquitto_message_callback_set(mosq, mqtt_message_callback);
     
-    if (mosquitto_connect(mosq, config->mqtt_host, config->mqtt_port, config->keepalive) != MOSQ_ERR_SUCCESS) {
+    printf("Connecting to MQTT broker at %s:%d...\n", config->mqtt_host, config->mqtt_port);
+    
+    if (mosquitto_connect(mosq, config->mqtt_host, config->mqtt_port, 
+                         config->mqtt.keepalive) != MOSQ_ERR_SUCCESS) {
         fprintf(stderr, "Failed to connect to MQTT broker\n");
         return -1;
     }
     
-    // Subscribe to command topics using header definitions
+    // Build and subscribe to command topic
     char topic[512];
-    snprintf(topic, sizeof(topic), "%s%s", config->base_topic, GPS_TOPIC_CMD);
-    mosquitto_subscribe(mosq, NULL, topic, 0);
+    snprintf(topic, sizeof(topic), "%s/%s", config->mqtt.base, config->mqtt.subtopics.commands);
+    
+    printf("Subscribing to MQTT topic: %s (QoS: %d)\n", topic, config->mqtt.qos);
+    
+    int rc = mosquitto_subscribe(mosq, NULL, topic, config->mqtt.qos);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        fprintf(stderr, "Failed to subscribe to command topic: %s\n", mosquitto_strerror(rc));
+        return -1;
+    }
     
     printf("MQTT connected and subscribed to command topics\n");
     return 0;
@@ -446,7 +565,12 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
     
     printf("Received MQTT message on topic: %s\n", topic);
     
-    if (payload && strstr(topic, GPS_TOPIC_CMD)) {
+    // Check if this is a command for us
+    char expected_topic[512];
+    snprintf(expected_topic, sizeof(expected_topic), "%s/%s", 
+             config.mqtt.base, config.mqtt.subtopics.commands);
+    
+    if (payload && strstr(topic, expected_topic)) {
         json_error_t error;
         json_t *root = json_loads(payload, 0, &error);
         if (!root) {
@@ -524,13 +648,20 @@ void publish_gps_data(void) {
     
     pthread_mutex_unlock(&data_mutex);
     
-    // Publish using header topic constant
-    char *json_str = json_dumps(root, JSON_COMPACT);
+    // Publish using configured topic and settings
+    char *json_str = json_dumps(root, JSON_INDENT(2));
     if (json_str) {
         char topic[512];
-        snprintf(topic, sizeof(topic), "%s%s", config.base_topic, GPS_TOPIC_DATA);
+        snprintf(topic, sizeof(topic), "%s/%s", config.mqtt.base, config.mqtt.subtopics.data);
         
-        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 0, false);
+        if (config.log_level >= 2) {
+            printf("Publishing to %s (QoS: %d, Retain: %s):\n%s\n", 
+                   topic, config.mqtt.qos, 
+                   config.mqtt.retain ? "true" : "false", json_str);
+        }
+        
+        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 
+                                 config.mqtt.qos, config.mqtt.retain);
         if (rc != MOSQ_ERR_SUCCESS) {
             fprintf(stderr, "Error publishing GPS data: %s\n", mosquitto_strerror(rc));
         }
@@ -564,13 +695,20 @@ void publish_gps_status(void) {
     json_object_set_new(performance, "data_age", json_real(time(NULL) - current_gps_data.timestamp));
     json_object_set_new(root, "performance", performance);
     
-    // Publish using header topic constant
+    // Publish using configured topic and settings
     char *json_str = json_dumps(root, JSON_COMPACT);
     if (json_str) {
         char topic[512];
-        snprintf(topic, sizeof(topic), "%s%s", config.base_topic, GPS_TOPIC_STATUS);
+        snprintf(topic, sizeof(topic), "%s/%s", config.mqtt.base, config.mqtt.subtopics.status);
         
-        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 0, false);
+        if (config.log_level >= 2) {
+            printf("Publishing to %s (QoS: %d, Retain: %s): %s\n", 
+                   topic, config.mqtt.qos, 
+                   config.mqtt.retain ? "true" : "false", json_str);
+        }
+        
+        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 
+                                 config.mqtt.qos, config.mqtt.retain);
         if (rc != MOSQ_ERR_SUCCESS) {
             fprintf(stderr, "Error publishing GPS status: %s\n", mosquitto_strerror(rc));
         }
@@ -596,13 +734,21 @@ void publish_gps_heartbeat(void) {
     json_object_set_new(root, "status", json_string("running"));
     json_object_set_new(root, "uptime", json_integer(now - start_time));
     
-    // Publish using header topic constant
+    // Publish using configured topic and settings
     char *json_str = json_dumps(root, JSON_COMPACT);
     if (json_str) {
         char topic[512];
-        snprintf(topic, sizeof(topic), "%s%s", config.base_topic, GPS_TOPIC_BRIDGE_HEARTBEAT);
+        snprintf(topic, sizeof(topic), "%s/%s", config.mqtt.base, config.mqtt.subtopics.heartbeat);
         
-        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 0, false);
+        if (config.log_level >= 2) {
+            printf("Publishing to %s (QoS: %d, Retain: %s): %s\n", 
+                   topic, config.mqtt.qos, 
+                   config.mqtt.retain ? "true" : "false", json_str);
+        }
+        
+        // Use QoS 0 for heartbeat to reduce broker load
+        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_str), json_str, 
+                                 0, false);
         if (rc != MOSQ_ERR_SUCCESS) {
             fprintf(stderr, "Error publishing GPS heartbeat: %s\n", mosquitto_strerror(rc));
         }

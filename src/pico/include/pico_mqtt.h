@@ -15,30 +15,30 @@
 // CONFIGURATION
 // =============================================================================
 
-// MQTT Broker Configuration
-#define PICO_MQTT_BROKER               "localhost"
-#define PICO_MQTT_PORT                 1883
-#define PICO_MQTT_USERNAME             "mower"
-#define PICO_MQTT_PASSWORD             "smart"
-#define PICO_MQTT_BASE_TOPIC           "smartmower/pico"
-#define PICO_MQTT_CLIENT_ID            "pico_bridge"
+// MQTT Configuration - Now loaded from robot_config.json
+// Default values used if config is not available
+#define PICO_MQTT_DEFAULT_BROKER       "localhost"
+#define PICO_MQTT_DEFAULT_PORT         1883
+#define PICO_MQTT_DEFAULT_USERNAME     "mower"
+#define PICO_MQTT_DEFAULT_PASSWORD     "smart"
+#define PICO_MQTT_DEFAULT_BASE_TOPIC   "smartmower/pico"
+#define PICO_MQTT_DEFAULT_CLIENT_ID    "pico_bridge"
+#define PICO_MQTT_DEFAULT_QOS         1
+#define PICO_MQTT_DEFAULT_RETAIN      false
+#define PICO_MQTT_DEFAULT_KEEPALIVE   60
+
+// Heartbeat interval (seconds)
 #define PICO_HEARTBEAT_INTERVAL_SEC    5
 
 // =============================================================================
-// PUBLISHED TOPICS (Pico Bridge -> MQTT)
-// =============================================================================
-
-#define PICO_TOPIC_SENSORS             "/sensors"          // Raw sensor data from Pico
-#define PICO_TOPIC_ODOMETRY            "/odometry"         // Motor/encoder data from Pico
-#define PICO_TOPIC_STATUS              "/status"           // Bridge status (not Pico hardware)
-#define PICO_TOPIC_BRIDGE_HEARTBEAT    "/heartbeat"        // Bridge heartbeat
-
-// =============================================================================
-// SUBSCRIBED TOPICS (MQTT -> Pico Bridge)
-// =============================================================================
-
-#define PICO_TOPIC_CMD_MOTORS          "/cmd/motors"       // Motor control commands
-#define PICO_TOPIC_CMD_SYSTEM          "/cmd/system"       // System control commands
+// Topic names - Actual paths are built using configuration
+// These are the default subtopic names that match the config
+#define PICO_TOPIC_SENSORS             "sensors"
+#define PICO_TOPIC_ODOMETRY            "odometry"
+#define PICO_TOPIC_STATUS              "status"
+#define PICO_TOPIC_HEARTBEAT           "heartbeat"
+#define PICO_TOPIC_CMD_MOTORS          "cmd/motors"
+#define PICO_TOPIC_CMD_SYSTEM          "cmd/system"
 
 // =============================================================================
 // MESSAGE TYPES

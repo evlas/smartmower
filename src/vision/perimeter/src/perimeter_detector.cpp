@@ -13,38 +13,49 @@
 // Vision MQTT definitions
 #include "vision_mqtt.h"
 
-// Configurazione
+// Configuration structure
 struct Config {
-    // MQTT settings (read from unified configuration)
-    std::string broker = "localhost";
-    int port = 1883;
+    // MQTT settings
+    std::string broker;
+    int port;
     std::string username;
     std::string password;
-    std::string subscribe_topic = VISION_TOPIC_CAMERA;
-    std::string publish_topic = VISION_TOPIC_PERIMETER;
-    std::string client_id = std::string(VISION_MQTT_CLIENT_ID) + "_perimeter";
+    std::string subscribe_topic;
+    std::string publish_topic;
+    std::string client_id;
     
-    // Camera
-    double focal_length = 600.0;
-    double height_cm = 30.0;
-    int width_px = 640;
-    int height_px = 480;
+    // Camera parameters
+    double focal_length;
+    double height_cm;
+    int width_px;
+    int height_px;
     
-    // Detection
-    int min_contour_area = 50;
-    int threshold_value = 50;
-    int blur_size = 3;
-    int erode_iterations = 1;
-    int dilate_iterations = 1;
+    // Detection parameters
+    int min_contour_area;
+    int threshold_value;
+    int blur_size;
+    int erode_iterations;
+    int dilate_iterations;
+    int hough_threshold;
+    int min_line_length;
+    int max_line_gap;
+    
+    // Color detection
+    cv::Scalar wire_color_low;
+    cv::Scalar wire_color_high;
+    
+    // Validation
+    int min_wire_segments;
+    double max_wire_distance;
+    
+    // Distance thresholds
+    double warning_distance_m;
+    double alert_distance_m;
+    double max_distance_m;
     
     // Debug
-    bool debug_enabled = true;
-    bool show_windows = true;
-    
-    // Perimeter
-    double warning_distance_m = 1.5;
-    double alert_distance_m = 0.8;
-    double max_distance_m = 5.0;
+    bool debug_enabled;
+    bool show_windows;
 };
 
 // Variabili globali
@@ -71,39 +82,64 @@ bool load_config(const std::string& filename) {
         return false;
     }
 
-    // Parse MQTT settings from unified configuration
-    cJSON* system = cJSON_GetObjectItemCaseSensitive(root, "system");
-    if (system) {
-        cJSON* communication = cJSON_GetObjectItemCaseSensitive(system, "communication");
-        if (communication) {
-            cJSON* mqtt_broker_host = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_host");
-            cJSON* mqtt_broker_port = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_port");
-            cJSON* mqtt_username = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_username");
-            cJSON* mqtt_password = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_password");
+    // Parse MQTT settings from configuration
+    cJSON* mqtt = cJSON_GetObjectItemCaseSensitive(root, "mqtt");
+    if (mqtt) {
+        // Get MQTT broker settings
+        cJSON* broker = cJSON_GetObjectItem(mqtt, "broker");
+        cJSON* port = cJSON_GetObjectItem(mqtt, "port");
+        cJSON* username = cJSON_GetObjectItem(mqtt, "username");
+        cJSON* password = cJSON_GetObjectItem(mqtt, "password");
+        
+        if (cJSON_IsString(broker)) config.broker = broker->valuestring;
+        if (cJSON_IsNumber(port)) config.port = port->valueint;
+        if (cJSON_IsString(username)) config.username = username->valuestring;
+        if (cJSON_IsString(password)) config.password = password->valuestring;
+        
+        // Get MQTT topics
+        cJSON* topics = cJSON_GetObjectItem(mqtt, "topics");
+        if (topics) {
+            cJSON* camera = cJSON_GetObjectItem(topics, "camera");
+            cJSON* perimeter = cJSON_GetObjectItem(topics, "perimeter");
             
-            if (cJSON_IsString(mqtt_broker_host)) config.broker = mqtt_broker_host->valuestring;
-            if (cJSON_IsNumber(mqtt_broker_port)) config.port = mqtt_broker_port->valueint;
-            if (cJSON_IsString(mqtt_username)) config.username = mqtt_username->valuestring;
-            if (cJSON_IsString(mqtt_password)) config.password = mqtt_password->valuestring;
+            if (cJSON_IsObject(camera)) {
+                cJSON* base = cJSON_GetObjectItem(camera, "base");
+                if (cJSON_IsString(base)) {
+                    config.subscribe_topic = base->valuestring;
+                }
+            }
+            
+            if (cJSON_IsObject(perimeter)) {
+                cJSON* base = cJSON_GetObjectItem(perimeter, "base");
+                if (cJSON_IsString(base)) {
+                    config.publish_topic = base->valuestring;
+                }
+            }
+        }
+    } // Chiude if(mqtt)
+    
+    // Load camera configuration from root
+    cJSON* camera = cJSON_GetObjectItem(root, "camera");
+    if (camera) {
+        config.width_px = cJSON_GetObjectItem(camera, "width")->valueint;
+        config.height_px = cJSON_GetObjectItem(camera, "height")->valueint;
+        
+        cJSON* intrinsics = cJSON_GetObjectItem(camera, "intrinsics");
+        if (intrinsics) {
+            cJSON* fx = cJSON_GetObjectItem(intrinsics, "focal_length_x");
+            if (fx) config.focal_length = fx->valuedouble;
+        }
+        
+        cJSON* height = cJSON_GetObjectItem(camera, "height_m");
+        if (height) {
+            // Converti da metri a centimetri
+            config.height_cm = height->valuedouble * 100.0;
         }
     }
-    
+        
     // Load perimeter detection configuration
     cJSON* perimeter_detection = cJSON_GetObjectItem(root, "perimeter_detection");
     if (perimeter_detection) {
-        // Load camera configuration
-        cJSON* camera = cJSON_GetObjectItem(perimeter_detection, "camera");
-        if (camera) {
-            cJSON* item;
-            if ((item = cJSON_GetObjectItem(camera, "focal_length"))) 
-                config.focal_length = item->valuedouble;
-            if ((item = cJSON_GetObjectItem(camera, "height_cm"))) 
-                config.height_cm = item->valuedouble;
-            if ((item = cJSON_GetObjectItem(camera, "width_px"))) 
-                config.width_px = item->valueint;
-            if ((item = cJSON_GetObjectItem(camera, "height_px"))) 
-                config.height_px = item->valueint;
-        }
         
         // Load detection parameters
         cJSON* detection = cJSON_GetObjectItem(perimeter_detection, "detection_parameters");

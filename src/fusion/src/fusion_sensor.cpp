@@ -510,12 +510,9 @@ void update_kalman_noise_models() {
     }
     
     // Update IMU noise based on temperature (if available)
-    double imu_noise_scale = 1.0;
-    if (g_pico_status.cpu_temp > 60.0) { // High temperature
-        imu_noise_scale = 1.5;
-    } else if (g_pico_status.cpu_temp > 70.0) { // Very high temperature
-        imu_noise_scale = 2.5;
-    }
+    // Nota: la variabile imu_noise_scale è stata rimossa in quanto non utilizzata
+    // La logica di scaling del rumore IMU basata sulla temperatura
+    // può essere implementata qui in futuro se necessario
     
     // TODO: Apply these noise parameters to the Kalman filter
     // This would require adding methods to KalmanFilter to adjust noise parameters

@@ -31,9 +31,10 @@
 #define CRTSCTS 020000000000
 #endif
 
-#define DEFAULT_UART_DEVICE "/dev/ttyUSB0"
-#define DEFAULT_BAUDRATE B921600
-#define BUFFER_SIZE 2048
+// Default configuration values
+#define DEFAULT_CONFIG_FILE "/opt/smartmower/etc/config/robot_config.json"
+#define DEFAULT_BAUDRATE B115200
+#define DEFAULT_BUFFER_SIZE 2048
 #define MAX_TOPIC_LEN 512
 #define MAX_PAYLOAD_LEN 1024
 
@@ -71,6 +72,23 @@ typedef struct {
     int curve_points;                   // Number of curve points
 } battery_config_t;
 
+// MQTT topic configuration
+typedef struct {
+    char base[256];
+    struct {
+        char sensors[64];
+        char odometry[64];
+        char status[64];
+        char heartbeat[64];
+        struct {
+            char motors[64];
+            char system[64];
+        } commands;
+    } subtopics;
+    int qos;
+    bool retain;
+} mqtt_config_t;
+
 // Configuration structure
 typedef struct {
     // Pico UART configuration
@@ -87,8 +105,9 @@ typedef struct {
     int mqtt_port;
     char mqtt_username[256];
     char mqtt_password[256];
-    char base_topic[256];
+    char client_id[64];
     int keepalive;
+    mqtt_config_t mqtt;                 // MQTT topic configuration
     
     // Logging configuration
     int log_level;
@@ -279,6 +298,33 @@ speed_t get_baudrate_constant(int baudrate);
 void process_binary_data(const uint8_t *data, size_t length);
 void sensor_data_to_json(const pico_sensor_data_t *data, char *json_buffer, size_t buffer_size);
 void status_report_to_json(const pico_status_report_t *data, char *json_buffer, size_t buffer_size);
+// Helper function to publish MQTT messages with proper configuration
+static int publish_mqtt(const char *subtopic, const char *payload, bool retain) {
+    if (!mosq || !subtopic || !payload) {
+        return -1;
+    }
+    
+    // Build full topic
+    char topic[512];
+    snprintf(topic, sizeof(topic), "%s/%s", config.mqtt.base, subtopic);
+    
+    // Publish with configured QoS and retain flag
+    int rc = mosquitto_publish(mosq, NULL, topic, strlen(payload), payload, 
+                              config.mqtt.qos, retain ? config.mqtt.retain : false);
+    
+    if (rc != MOSQ_ERR_SUCCESS) {
+        fprintf(stderr, "Error publishing to %s: %s\n", topic, mosquitto_strerror(rc));
+        return -1;
+    }
+    
+    if (config.log_level > 1) {
+        printf("Published to %s (QoS: %d, Retain: %d): %s\n", 
+               topic, config.mqtt.qos, retain ? config.mqtt.retain : 0, payload);
+    }
+    
+    return 0;
+}
+
 void odometry_data_to_json(const pico_status_report_t *data, char *json_buffer, size_t buffer_size);
 void send_motor_command(float left, float right, float blade1, float blade2);
 void send_system_command(uint8_t cmd_id, float value);
@@ -304,8 +350,18 @@ int main(int argc, char *argv[]) {
     
     printf("Starting Pico Bridge with config: %s\n", config_file);
     printf("UART: %s @ %d baud\n", config.uart_device, config.baudrate);
-    printf("MQTT: %s:%d, topic: %s\n", config.mqtt_host, config.mqtt_port, config.base_topic);
-    printf("MQTT credentials: user='%s', pass='%s'\n", config.mqtt_username, config.mqtt_password);
+    printf("MQTT: %s:%d, client_id: %s\n", config.mqtt_host, config.mqtt_port, config.client_id);
+    printf("MQTT base topic: %s\n", config.mqtt.base);
+    printf("MQTT credentials: user='%s'\n", config.mqtt_username);
+    printf("MQTT QoS: %d, Retain: %s\n", config.mqtt.qos, config.mqtt.retain ? "true" : "false");
+    printf("MQTT topics: sensors=%s, odometry=%s, status=%s, heartbeat=%s\n",
+           config.mqtt.subtopics.sensors,
+           config.mqtt.subtopics.odometry,
+           config.mqtt.subtopics.status,
+           config.mqtt.subtopics.heartbeat);
+    printf("MQTT command topics: motors=%s, system=%s\n",
+           config.mqtt.subtopics.commands.motors,
+           config.mqtt.subtopics.commands.system);
     
     // Initialize UART
     uart_fd = init_uart(config.uart_device, config.baudrate);
@@ -412,10 +468,30 @@ int init_uart(const char *device, int baudrate) {
     return fd;
 }
 
+// Helper function to build topic strings
+static void build_topic(char *dest, size_t dest_size, const char *base, const char *subtopic) {
+    snprintf(dest, dest_size, "%s/%s", base, subtopic);
+}
+
+// Helper function to subscribe to a topic with error checking
+static int mqtt_subscribe_topic(const char *topic, int qos) {
+    if (!mosq || !topic) return -1;
+    
+    int rc = mosquitto_subscribe(mosq, NULL, topic, qos);
+    if (rc != MOSQ_ERR_SUCCESS) {
+        fprintf(stderr, "Failed to subscribe to topic %s: %s\n", 
+                topic, mosquitto_strerror(rc));
+        return -1;
+    }
+    printf("Subscribed to topic: %s (QoS: %d)\n", topic, qos);
+    return 0;
+}
+
 int init_mqtt(config_t *config) {
     mosquitto_lib_init();
     
-    mosq = mosquitto_new(PICO_MQTT_CLIENT_ID, true, NULL);
+    // Create MQTT client with configured client ID
+    mosq = mosquitto_new(config->client_id, true, NULL);
     if (!mosq) {
         fprintf(stderr, "Failed to create mosquitto client\n");
         return -1;
@@ -423,16 +499,18 @@ int init_mqtt(config_t *config) {
     
     // Set username and password if provided
     if (strlen(config->mqtt_username) > 0) {
-        printf("Setting MQTT credentials: user='%s', pass='%s'\n", config->mqtt_username, config->mqtt_password);
+        printf("Setting MQTT credentials: user='%s'\n", config->mqtt_username);
         mosquitto_username_pw_set(mosq, config->mqtt_username, config->mqtt_password);
     } else {
         printf("No MQTT credentials provided, connecting without authentication\n");
     }
     
+    // Set message callback
     mosquitto_message_callback_set(mosq, mqtt_message_callback);
     
-    printf("Attempting to connect to MQTT broker %s:%d with keepalive %d\n", 
-           config->mqtt_host, config->mqtt_port, config->keepalive);
+    // Connect to broker
+    printf("Attempting to connect to MQTT broker %s:%d with client ID '%s' (keepalive: %d)\n", 
+           config->mqtt_host, config->mqtt_port, config->client_id, config->keepalive);
     
     int rc = mosquitto_connect(mosq, config->mqtt_host, config->mqtt_port, config->keepalive);
     if (rc != MOSQ_ERR_SUCCESS) {
@@ -440,17 +518,24 @@ int init_mqtt(config_t *config) {
         return -1;
     }
     
-    printf("MQTT connection initiated successfully\n");
+    printf("Connected to MQTT broker\n");
     
-    // Subscribe to command topics using header definitions
-    char topic[MAX_TOPIC_LEN];
-    snprintf(topic, sizeof(topic), "%s%s", config->base_topic, PICO_TOPIC_CMD_MOTORS);
-    mosquitto_subscribe(mosq, NULL, topic, 0);
+    // Subscribe to command topics
+    char topic_buffer[512];
     
-    snprintf(topic, sizeof(topic), "%s%s", config->base_topic, PICO_TOPIC_CMD_SYSTEM);
-    mosquitto_subscribe(mosq, NULL, topic, 0);
+    // Subscribe to motor commands
+    build_topic(topic_buffer, sizeof(topic_buffer), 
+               config->mqtt.base, 
+               config->mqtt.subtopics.commands.motors);
+    mqtt_subscribe_topic(topic_buffer, config->mqtt.qos);
     
-    printf("MQTT connected and subscribed to command topics\n");
+    // Subscribe to system commands
+    build_topic(topic_buffer, sizeof(topic_buffer),
+               config->mqtt.base,
+               config->mqtt.subtopics.commands.system);
+    mqtt_subscribe_topic(topic_buffer, config->mqtt.qos);
+    
+    printf("MQTT initialization complete\n");
     return 0;
 }
 
@@ -465,6 +550,14 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
     
     printf("Received MQTT message on topic: %s\n", topic);
     
+    // Build expected command topics for comparison
+    char motor_cmd_topic[512];
+    char system_cmd_topic[512];
+    snprintf(motor_cmd_topic, sizeof(motor_cmd_topic), "%s/%s", 
+             config.mqtt.base, config.mqtt.subtopics.commands.motors);
+    snprintf(system_cmd_topic, sizeof(system_cmd_topic), "%s/%s",
+             config.mqtt.base, config.mqtt.subtopics.commands.system);
+    
     if (payload) {
         json_error_t error;
         json_t *root = json_loads(payload, 0, &error);
@@ -473,8 +566,8 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
             return;
         }
         
-        // Handle motor commands using header constants
-        if (strstr(topic, PICO_TOPIC_CMD_MOTORS)) {
+        // Handle motor commands using configured topics
+        if (strcmp(topic, motor_cmd_topic) == 0) {
             json_t *left = json_object_get(root, "left_speed");
             json_t *right = json_object_get(root, "right_speed");
             json_t *blade1 = json_object_get(root, "blade1_speed");
@@ -482,16 +575,21 @@ void mqtt_message_callback(struct mosquitto *mosq, void *userdata, const struct 
             
             if (json_is_number(left) && json_is_number(right) && 
                 json_is_number(blade1) && json_is_number(blade2)) {
-                send_motor_command(
-                    json_number_value(left),
-                    json_number_value(right),
-                    json_number_value(blade1),
-                    json_number_value(blade2)
-                );
+                float left_val = json_number_value(left);
+                float right_val = json_number_value(right);
+                float blade1_val = json_number_value(blade1);
+                float blade2_val = json_number_value(blade2);
+                
+                if (config.log_level > 0) {
+                    printf("Received motor command: L=%.1f R=%.1f B1=%.1f B2=%.1f\n", 
+                           left_val, right_val, blade1_val, blade2_val);
+                }
+                
+                send_motor_command(left_val, right_val, blade1_val, blade2_val);
             }
         }
-        // Handle system commands using header constants
-        else if (strstr(topic, PICO_TOPIC_CMD_SYSTEM)) {
+        // Handle system commands using configured topics
+        else if (strcmp(topic, system_cmd_topic) == 0) {
             json_t *command = json_object_get(root, "command");
             json_t *value = json_object_get(root, "value");
             
@@ -531,19 +629,15 @@ void process_binary_data(const uint8_t *data, size_t length) {
                 has_sensor_data = true;
                 pthread_mutex_unlock(&data_mutex);
                 
-                // Publish immediately (100Hz from Pico)
+                // Publish sensor data (100Hz from Pico)
                 char json_buffer[MAX_PAYLOAD_LEN];
                 sensor_data_to_json(sensor_data, json_buffer, sizeof(json_buffer));
                 
-                char topic[MAX_TOPIC_LEN];
-                snprintf(topic, sizeof(topic), "%s%s", config.base_topic, PICO_TOPIC_SENSORS);
-                
-                printf("Publishing sensor data to topic: %s\n", topic);
-                int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_buffer), json_buffer, 0, false);
-                if (rc != MOSQ_ERR_SUCCESS) {
-                    fprintf(stderr, "Error publishing sensor data: %s\n", mosquitto_strerror(rc));
-                } else {
-                    printf("Sensor data published successfully\n");
+                // Publish with configured QoS and retain flag
+                if (publish_mqtt(config.mqtt.subtopics.sensors, json_buffer, false) == 0) {
+                    if (config.log_level > 1) {
+                        printf("Sensor data published successfully\n");
+                    }
                 }
             } else {
                 printf("Sensor data length too small: %zu < %zu\n", length, sizeof(pico_sensor_data_t));
@@ -561,19 +655,15 @@ void process_binary_data(const uint8_t *data, size_t length) {
                 has_status_data = true;
                 pthread_mutex_unlock(&data_mutex);
                 
-                // Publish odometry data immediately (motors, encoders)
+                // Publish odometry data (motors, encoders)
                 char json_buffer[MAX_PAYLOAD_LEN];
                 odometry_data_to_json(status_data, json_buffer, sizeof(json_buffer));
                 
-                char topic[MAX_TOPIC_LEN];
-                snprintf(topic, sizeof(topic), "%s%s", config.base_topic, PICO_TOPIC_ODOMETRY);
-                
-                printf("Publishing odometry data to topic: %s\n", topic);
-                int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_buffer), json_buffer, 0, false);
-                if (rc != MOSQ_ERR_SUCCESS) {
-                    fprintf(stderr, "Error publishing odometry data: %s\n", mosquitto_strerror(rc));
-                } else {
-                    printf("Odometry data published successfully\n");
+                // Publish with configured QoS and retain flag
+                if (publish_mqtt(config.mqtt.subtopics.odometry, json_buffer, false) == 0) {
+                    if (config.log_level > 1) {
+                        printf("Odometry data published successfully\n");
+                    }
                 }
             } else {
                 printf("Status data length too small: %zu < %zu\n", length, sizeof(pico_status_report_t));
@@ -759,13 +849,8 @@ void publish_bridge_heartbeat(void) {
         now - start_time
     );
     
-    char topic[MAX_TOPIC_LEN];
-    snprintf(topic, sizeof(topic), "%s%s", config.base_topic, PICO_TOPIC_BRIDGE_HEARTBEAT);
-    
-    int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_buffer), json_buffer, 0, false);
-    if (rc != MOSQ_ERR_SUCCESS) {
-        fprintf(stderr, "Error publishing heartbeat: %s\n", mosquitto_strerror(rc));
-    }
+    // Publish with configured QoS and retain flag
+    publish_mqtt(config.mqtt.subtopics.heartbeat, json_buffer, true);
 }
 
 // Publish latest sensor data to MQTT
@@ -776,13 +861,8 @@ void publish_sensor_data(void) {
         char json_buffer[MAX_PAYLOAD_LEN];
         sensor_data_to_json(&latest_sensor_data, json_buffer, sizeof(json_buffer));
         
-        char topic[MAX_TOPIC_LEN];
-        snprintf(topic, sizeof(topic), "%s%s", PICO_MQTT_BASE_TOPIC, PICO_TOPIC_SENSORS);
-        
-        int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_buffer), json_buffer, 0, false);
-        if (rc != MOSQ_ERR_SUCCESS) {
-            fprintf(stderr, "Error publishing sensor data: %s\n", mosquitto_strerror(rc));
-        }
+        // Publish with configured QoS and retain flag
+        publish_mqtt(config.mqtt.subtopics.sensors, json_buffer, true);
     }
     
     pthread_mutex_unlock(&data_mutex);
@@ -821,18 +901,13 @@ void publish_periodic_status(void) {
         now
     );
     
-    char topic[MAX_TOPIC_LEN];
-    snprintf(topic, sizeof(topic), "%s%s", config.base_topic, PICO_TOPIC_STATUS);
-    
-    int rc = mosquitto_publish(mosq, NULL, topic, strlen(json_buffer), json_buffer, 0, false);
-    if (rc != MOSQ_ERR_SUCCESS) {
-        fprintf(stderr, "Error publishing bridge status: %s\n", mosquitto_strerror(rc));
-    }
+    // Publish with configured QoS and retain flag
+    publish_mqtt(config.mqtt.subtopics.status, json_buffer, true);
 }
 
 void uart_reader_thread(void *arg) {
     (void)arg;
-    uint8_t buffer[BUFFER_SIZE];
+    uint8_t buffer[DEFAULT_BUFFER_SIZE];
     
     while (running) {
         ssize_t bytes_read = read(uart_fd, buffer, sizeof(buffer));
@@ -937,23 +1012,35 @@ int load_battery_profile(json_t *root, const char *profile_name, battery_config_
 
 // Configuration loading from centralized robot_config.json
 int load_config(const char *filename, config_t *config) {
-    // Set defaults
-    strcpy(config->base_topic, PICO_MQTT_BASE_TOPIC);
-    strcpy(config->uart_device, "/dev/ttyAMA1");
+    // Set defaults first
+    strncpy(config->uart_device, "/dev/ttyAMA1", sizeof(config->uart_device) - 1);
     config->baudrate = 115200;
     config->uart_timeout = 1000;
-    strcpy(config->mqtt_host, "localhost");
+    strncpy(config->battery_profile, "battery_24v_lipo", sizeof(config->battery_profile) - 1);
+    config->log_level = 1;  // Default to INFO level
+    strncpy(config->log_file, "/var/log/smartmower/pico_bridge.log", sizeof(config->log_file) - 1);
+    
+    // MQTT defaults from config file
+    strncpy(config->mqtt_host, "localhost", sizeof(config->mqtt_host) - 1);
     config->mqtt_port = 1883;
     config->keepalive = 60;
-    config->log_level = 1;
-    strcpy(config->log_file, "pico_bridge.log");
-    strcpy(config->battery_profile, "liion_6s"); // Default profile
-    // Initialize MQTT credentials to empty
-    config->mqtt_username[0] = '\0';
-    config->mqtt_password[0] = '\0';
+    strncpy(config->client_id, "pico_bridge", sizeof(config->client_id) - 1);
+    strncpy(config->mqtt_username, "mower", sizeof(config->mqtt_username) - 1);
+    strncpy(config->mqtt_password, "smart", sizeof(config->mqtt_password) - 1);
     
-    // Set battery defaults (will be overridden by profile)
-    strcpy(config->battery.type, "lithium_ion");
+    // Set MQTT topics from config
+    strncpy(config->mqtt.base, "pico", sizeof(config->mqtt.base) - 1);
+    strncpy(config->mqtt.subtopics.sensors, "sensors", sizeof(config->mqtt.subtopics.sensors) - 1);
+    strncpy(config->mqtt.subtopics.odometry, "odometry", sizeof(config->mqtt.subtopics.odometry) - 1);
+    strncpy(config->mqtt.subtopics.status, "status", sizeof(config->mqtt.subtopics.status) - 1);
+    strncpy(config->mqtt.subtopics.heartbeat, "heartbeat", sizeof(config->mqtt.subtopics.heartbeat) - 1);
+    strncpy(config->mqtt.subtopics.commands.motors, "cmd/motors", sizeof(config->mqtt.subtopics.commands.motors) - 1);
+    strncpy(config->mqtt.subtopics.commands.system, "cmd/system", sizeof(config->mqtt.subtopics.commands.system) - 1);
+    config->mqtt.qos = 1;
+    config->mqtt.retain = false;
+    
+    // Set battery defaults (will be overridden by profile if it exists)
+    strncpy(config->battery.type, "lithium_ion", sizeof(config->battery.type) - 1);
     config->battery.cells = 6;
     config->battery.nominal_voltage_per_cell = 3.7f;
     config->battery.max_voltage_per_cell = 4.2f;
@@ -975,27 +1062,50 @@ int load_config(const char *filename, config_t *config) {
         return -1;
     }
     
-    // Parse pico configuration from centralized configuration (root level)
+    // Parse pico configuration from centralized configuration
     json_t *pico_config = json_object_get(root, "pico_config");
     if (pico_config) {
+        // UART Configuration
         json_t *uart_device = json_object_get(pico_config, "uart_device");
-        if (uart_device && json_is_string(uart_device)) {
-            strncpy(config->uart_device, json_string_value(uart_device), sizeof(config->uart_device) - 1);
+        if (json_is_string(uart_device)) {
+            strncpy(config->uart_device, json_string_value(uart_device), 
+                   sizeof(config->uart_device) - 1);
         }
         
         json_t *baudrate = json_object_get(pico_config, "baudrate");
-        if (baudrate && json_is_integer(baudrate)) {
+        if (json_is_integer(baudrate)) {
             config->baudrate = json_integer_value(baudrate);
         }
         
         json_t *timeout = json_object_get(pico_config, "uart_timeout_ms");
-        if (timeout && json_is_integer(timeout)) {
+        if (json_is_integer(timeout)) {
             config->uart_timeout = json_integer_value(timeout);
         }
         
+        // Battery Configuration
         json_t *battery_profile = json_object_get(pico_config, "battery_profile");
-        if (battery_profile && json_is_string(battery_profile)) {
-            strcpy(config->battery_profile, json_string_value(battery_profile));
+        if (json_is_string(battery_profile)) {
+            strncpy(config->battery_profile, json_string_value(battery_profile), 
+                   sizeof(config->battery_profile) - 1);
+        }
+        
+        // Logging Configuration
+        json_t *logging = json_object_get(root, "pico_logging");
+        if (logging) {
+            json_t *log_level = json_object_get(logging, "level");
+            if (json_is_string(log_level)) {
+                const char *level = json_string_value(log_level);
+                if (strcasecmp(level, "debug") == 0) config->log_level = 0;
+                else if (strcasecmp(level, "info") == 0) config->log_level = 1;
+                else if (strcasecmp(level, "warning") == 0) config->log_level = 2;
+                else if (strcasecmp(level, "error") == 0) config->log_level = 3;
+            }
+            
+            json_t *log_file = json_object_get(logging, "file");
+            if (json_is_string(log_file)) {
+                strncpy(config->log_file, json_string_value(log_file), 
+                       sizeof(config->log_file) - 1);
+            }
         }
     }
     
@@ -1040,33 +1150,132 @@ int load_config(const char *filename, config_t *config) {
         printf("Loaded %d battery voltage curve points\n", config->battery.curve_points);
     }
     
-    // Parse MQTT credentials from system.communication section
+    // Parse MQTT configuration
+    json_t *mqtt = json_object_get(root, "mqtt");
+    if (mqtt) {
+        // Get MQTT broker settings
+        json_t *broker = json_object_get(mqtt, "broker");
+        if (json_is_string(broker)) {
+            strncpy(config->mqtt_host, json_string_value(broker), 
+                   sizeof(config->mqtt_host) - 1);
+        }
+        
+        json_t *port = json_object_get(mqtt, "port");
+        if (json_is_integer(port)) {
+            config->mqtt_port = json_integer_value(port);
+        }
+        
+        json_t *username = json_object_get(mqtt, "username");
+        if (json_is_string(username)) {
+            strncpy(config->mqtt_username, json_string_value(username), 
+                   sizeof(config->mqtt_username) - 1);
+        }
+        
+        json_t *password = json_object_get(mqtt, "password");
+        if (json_is_string(password)) {
+            strncpy(config->mqtt_password, json_string_value(password), 
+                   sizeof(config->mqtt_password) - 1);
+        }
+        
+        // Parse MQTT topics
+        json_t *topics = json_object_get(mqtt, "topics");
+        if (topics) {
+            json_t *pico = json_object_get(topics, "pico");
+            if (pico) {
+                // Get base topic
+                json_t *base = json_object_get(pico, "base");
+                if (json_is_string(base)) {
+                    strncpy(config->mqtt.base, json_string_value(base), 
+                           sizeof(config->mqtt.base) - 1);
+                }
+                
+                // Get keepalive from pico section if available, otherwise from root mqtt
+                json_t *keepalive = json_object_get(pico, "keepalive");
+                if (!keepalive) {
+                    keepalive = json_object_get(mqtt, "keepalive");
+                }
+                if (json_is_integer(keepalive)) {
+                    config->keepalive = json_integer_value(keepalive);
+                }
+                
+                // Get client ID from pico section if available
+                json_t *client_id = json_object_get(pico, "client_id");
+                if (json_is_string(client_id)) {
+                    strncpy(config->client_id, json_string_value(client_id),
+                           sizeof(config->client_id) - 1);
+                }
+                
+                // Get QoS and retain settings
+                json_t *qos = json_object_get(pico, "qos");
+                if (json_is_integer(qos)) {
+                    int qos_val = json_integer_value(qos);
+                    if (qos_val >= 0 && qos_val <= 2) {
+                        config->mqtt.qos = qos_val;
+                    }
+                }
+                
+                json_t *retain = json_object_get(pico, "retain");
+                if (json_is_boolean(retain)) {
+                    config->mqtt.retain = json_boolean_value(retain);
+                }
+                
+                // Get subtopics
+                json_t *subtopics = json_object_get(pico, "subtopics");
+                if (subtopics) {
+                    json_t *sensors = json_object_get(subtopics, "sensors");
+                    if (json_is_string(sensors)) {
+                        strncpy(config->mqtt.subtopics.sensors, json_string_value(sensors),
+                               sizeof(config->mqtt.subtopics.sensors) - 1);
+                    }
+                    
+                    json_t *odometry = json_object_get(subtopics, "odometry");
+                    if (json_is_string(odometry)) {
+                        strncpy(config->mqtt.subtopics.odometry, json_string_value(odometry),
+                               sizeof(config->mqtt.subtopics.odometry) - 1);
+                    }
+                    
+                    json_t *status = json_object_get(subtopics, "status");
+                    if (json_is_string(status)) {
+                        strncpy(config->mqtt.subtopics.status, json_string_value(status),
+                               sizeof(config->mqtt.subtopics.status) - 1);
+                    }
+                    
+                    json_t *heartbeat = json_object_get(subtopics, "heartbeat");
+                    if (json_is_string(heartbeat)) {
+                        strncpy(config->mqtt.subtopics.heartbeat, json_string_value(heartbeat),
+                               sizeof(config->mqtt.subtopics.heartbeat) - 1);
+                    }
+                    
+                    // Get command subtopics
+                    json_t *commands = json_object_get(subtopics, "commands");
+                    if (commands) {
+                        json_t *motors = json_object_get(commands, "motors");
+                        if (json_is_string(motors)) {
+                            strncpy(config->mqtt.subtopics.commands.motors, json_string_value(motors),
+                                   sizeof(config->mqtt.subtopics.commands.motors) - 1);
+                        }
+                        
+                        json_t *system = json_object_get(commands, "system");
+                        if (json_is_string(system)) {
+                            strncpy(config->mqtt.subtopics.commands.system, json_string_value(system),
+                                   sizeof(config->mqtt.subtopics.commands.system) - 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+            
+    // Load MQTT password from system.communication section if available
     json_t *system = json_object_get(root, "system");
     if (system) {
         json_t *communication = json_object_get(system, "communication");
         if (communication) {
-            json_t *mqtt_host = json_object_get(communication, "mqtt_broker_host");
-            if (mqtt_host && json_is_string(mqtt_host)) {
-                strcpy(config->mqtt_host, json_string_value(mqtt_host));
-            }
-            
-            json_t *mqtt_port = json_object_get(communication, "mqtt_broker_port");
-            if (mqtt_port && json_is_integer(mqtt_port)) {
-                config->mqtt_port = json_integer_value(mqtt_port);
-            }
-            
-            json_t *mqtt_username = json_object_get(communication, "mqtt_username");
-            if (mqtt_username && json_is_string(mqtt_username)) {
-                strcpy(config->mqtt_username, json_string_value(mqtt_username));
-                printf("DEBUG: Loaded MQTT username from JSON: '%s'\n", config->mqtt_username);
-            } else {
-                printf("DEBUG: No MQTT username found in JSON, using default\n");
-            }
-            
             json_t *mqtt_password = json_object_get(communication, "mqtt_password");
             if (mqtt_password && json_is_string(mqtt_password)) {
-                strcpy(config->mqtt_password, json_string_value(mqtt_password));
-                printf("DEBUG: Loaded MQTT password from JSON: '%s'\n", config->mqtt_password);
+                strncpy(config->mqtt_password, json_string_value(mqtt_password), 
+                       sizeof(config->mqtt_password) - 1);
+                printf("DEBUG: Loaded MQTT password from JSON\n");
             } else {
                 printf("DEBUG: No MQTT password found in JSON, using default\n");
             }
@@ -1079,8 +1288,8 @@ int load_config(const char *filename, config_t *config) {
            config->mqtt_host, config->mqtt_port, 
            strlen(config->mqtt_username) > 0 ? config->mqtt_username : "(none)");
     
-    json_decref(root);
-    fclose(file);
+    if (root) json_decref(root);
+    if (file) fclose(file);
     return 0;
 }
 

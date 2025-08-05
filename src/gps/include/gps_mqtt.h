@@ -12,31 +12,13 @@
 #include <stdbool.h>
 
 // =============================================================================
-// CONFIGURATION
+// MESSAGE TYPES
 // =============================================================================
 
-// MQTT Broker Configuration
-#define GPS_MQTT_BROKER                "localhost"
-#define GPS_MQTT_PORT                  1883
-#define GPS_MQTT_USERNAME              "mower"
-#define GPS_MQTT_PASSWORD              "smart"
-#define GPS_MQTT_BASE_TOPIC            "smartmower/gps"
-#define GPS_MQTT_CLIENT_ID             "gps_bridge"
-#define GPS_HEARTBEAT_INTERVAL_SEC     5
-
-// =============================================================================
-// PUBLISHED TOPICS (GPS Bridge -> MQTT)
-// =============================================================================
-
-#define GPS_TOPIC_DATA                 "/data"             // GPS position and navigation data
-#define GPS_TOPIC_STATUS               "/status"           // GPS system status
-#define GPS_TOPIC_BRIDGE_HEARTBEAT     "/heartbeat"    // Bridge heartbeat
-
-// =============================================================================
-// SUBSCRIBED TOPICS (MQTT -> GPS Bridge)
-// =============================================================================
-
-#define GPS_TOPIC_CMD                  "/cmd"              // GPS control commands
+// JSON message type identifiers
+#define GPS_JSON_DATA                  "gps_data"
+#define GPS_JSON_STATUS                "gps_status"
+#define GPS_JSON_HEARTBEAT             "gps_heartbeat"
 
 // =============================================================================
 // MESSAGE TYPES

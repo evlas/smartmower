@@ -542,7 +542,8 @@ void on_message(__attribute__((unused)) struct mosquitto *mosq, void *obj, const
             json_object *j_type, *j_power;
             
             if (json_object_object_get_ex(j_root, "type", &j_type)) {
-                const char* msg_type = json_object_get_string(j_type);
+                // Get message type but don't store it since it's not used
+                (void)json_object_get_string(j_type);
                 
                 // Handle both old and new power data formats
                 if (json_object_object_get_ex(j_root, "power", &j_power)) {
