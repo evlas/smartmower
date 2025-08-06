@@ -297,21 +297,6 @@
     }
   },
   "tuning": {
-    "pid": {
-      "linear_kp": 1.0,
-      "linear_ki": 0.1,
-      "linear_kd": 0.05,
-      "angular_kp": 2.0,
-      "angular_ki": 0.2,
-      "angular_kd": 0.1
-    },
-    "kalman": {
-      "process_noise_pos": 0.1,
-      "process_noise_vel": 0.01,
-      "measurement_noise_gps": 1.0,
-      "measurement_noise_imu": 0.1,
-      "initial_covariance": 1.0
-    },
     "speeds": {
       "max_linear_speed": 1.5,
       "max_angular_speed": 1.0,
@@ -424,63 +409,6 @@
       "file": "/opt/smartmower/log/gps_bridge.log",
       "data_dir": "/opt/smartmower/data/gps"
     },
-    "fusion_config": {
-      "imu": {
-        "update_rate_hz": 100,
-        "accel_range_g": 4,
-        "gyro_range_dps": 500,
-        "mag_range_ut": 4800,
-        "calibration": {
-          "accel_offset": [0.0, 0.0, 0.0],
-          "gyro_offset": [0.0, 0.0, 0.0],
-          "mag_offset": [0.0, 0.0, 0.0],
-          "mag_scale": [1.0, 1.0, 1.0]
-        }
-      },
-      "gps": {
-        "update_rate_hz": 5,
-        "timeout_ms": 2000,
-        "hdop_threshold": 3.0,
-        "min_satellites": 4
-      },
-      "odometry": {
-        "wheel_base": 0.5,
-        "wheel_radius": 0.1,
-        "ticks_per_revolution": 1000
-      },
-      "fusion_parameters": {
-        "update_rate_hz": 100,
-        "publish_rate_hz": 20,
-        "process_noise": {
-          "position": 0.1,
-          "velocity": 0.1,
-          "orientation": 0.01
-        },
-        "measurement_noise": {
-          "gps_position": 1.0,
-          "imu_accel": 0.1,
-          "imu_gyro": 0.01,
-          "odometry": 0.05
-        },
-        "filter_alpha": {
-          "velocity": 0.2,
-          "position": 0.1,
-          "orientation": 0.3
-        }
-      },
-      "mqtt_settings": {
-        "qos": 1,
-        "retain": true,
-        "keepalive": 60
-      }
-    },
-    "fusion_logging": {
-      "enabled": true,
-      "level": "info",
-      "file": "/opt/smartmower/log/fusion_sensor.log",
-      "save_raw_data": false,
-      "data_dir": "/opt/smartmower/data/fusion"
-    },
     "sensors": {
       "gps_accuracy_threshold": 2.0,
       "imu_calibration_samples": 1000,
@@ -489,13 +417,78 @@
       "tilt_angle_limit": 30
     }
   },
+  "fusion_config": {
+    "tuning": {
+      "pid": {
+        "linear_kp": 1.0,
+        "linear_ki": 0.1,
+        "linear_kd": 0.05,
+        "angular_kp": 2.0,
+        "angular_ki": 0.2,
+        "angular_kd": 0.1
+      }
+    },
+    "imu": {
+      "update_rate_hz": 100,
+      "accel_range_g": 4,
+      "gyro_range_dps": 500,
+      "mag_range_ut": 4800,
+      "calibration": {
+        "accel_offset": [0.0, 0.0, 0.0],
+        "gyro_offset": [0.0, 0.0, 0.0],
+        "mag_offset": [0.0, 0.0, 0.0],
+        "mag_scale": [1.0, 1.0, 1.0]
+      }
+    },
+    "gps": {
+      "update_rate_hz": 5,
+      "timeout_ms": 2000,
+      "hdop_threshold": 3.0,
+      "min_satellites": 4
+    },
+    "fusion_parameters": {
+      "update_rate_hz": 100,
+      "publish_rate_hz": 20,
+      "process_noise": {
+        "position": 0.1,
+        "velocity": 0.1,
+        "orientation": 0.01
+      },
+      "measurement_noise": {
+        "gps_position": 1.0,
+        "imu_accel": 0.1,
+        "imu_gyro": 0.01,
+        "odometry": 0.05
+      },
+      "filter_alpha": {
+        "velocity": 0.2,
+        "position": 0.1,
+        "orientation": 0.3
+      }
+    },
+    "mqtt_settings": {
+      "qos": 1,
+      "retain": false,
+      "keepalive": 60
+    }
+  },
+  "fusion_logging": {
+    "enabled": true,
+    "level": "info",
+    "file": "/opt/smartmower/log/fusion_sensor.log",
+    "save_raw_data": false,
+    "data_dir": "/opt/smartmower/data/fusion"
+  },
   "hardware": {
     "dimensions": {
       "robot_length": 0.6,
       "robot_width": 0.4,
       "robot_height": 0.25,
       "wheel_base": 0.35,
-      "wheel_diameter": 0.2
+      "wheel_diameter": 0.2,
+      "wheel_track": 0.3,
+      "ground_clearance": 0.05,
+      "weight": 15.0
     },
     "blade": {
       "diameter": 0.18,
@@ -504,10 +497,12 @@
       "cutting_deck_width": 0.2
     },
     "motors": {
-      "max_rpm": 3000,
-      "gear_ratio": 10.0,
-      "encoder_pulses_per_rev": 1024,
-      "blade_motor_max_rpm": 4000
+      "motors_max_rpm": 5000,
+      "motors_gear_ratio": 185.0,
+      "motors_encoder_pulses_per_rev": 12,
+      "blade_motor_max_rpm": 6000,
+      "blade_motor_gear_ratio": 1.0,
+      "blade_motor_encoder_pulses_per_rev": 6
     }
   },
   "system": {
@@ -916,5 +911,6 @@
     "file": "/opt/smartmower/log/pico_bridge.log",
     "max_size_mb": 10,
     "max_files": 5
-  }
+  },
+  "unused": {}
 }

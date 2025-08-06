@@ -1,0 +1,248 @@
+{
+  "mqtt": {
+    "broker": "localhost",
+    "port": 1883,
+    "username": "mower",
+    "password": "smart",
+    "topics": {
+      "camera": {
+        "base": "vision/camera",
+        "subtopics": {
+          "frame": "frame",
+          "status": "status",
+          "commands": "commands",
+          "heartbeat": "heartbeat"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "obstacle": {
+        "base": "vision/obstacle",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status",
+          "obstacles": "obstacles"
+        },
+        "publish_threshold": 0.08,
+        "qos": 1,
+        "retain": false
+      },
+      "perimeter": {
+        "base": "vision/perimeter",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "grass": {
+        "base": "vision/grass",
+        "subtopics": {
+          "detection": "detection",
+          "status": "status"
+        },
+        "qos": 1,
+        "retain": false
+      },
+      "gps": {
+        "base": "smartmower/gps",
+        "subtopics": {
+          "data": "data",
+          "status": "status",
+          "heartbeat": "heartbeat",
+          "commands": "cmd"
+        },
+        "qos": 1,
+        "retain": false,
+        "keepalive": 60
+      },
+      "pico": {
+        "base": "pico",
+        "subtopics": {
+          "sensors": "sensors",
+          "odometry": "odometry",
+          "status": "status",
+          "heartbeat": "heartbeat",
+          "commands": {
+            "motors": "cmd/motors",
+            "system": "cmd/system"
+          }
+        },
+        "qos": 1,
+        "retain": false,
+        "keepalive": 60,
+        "client_id": "pico_bridge"
+      }
+    }
+  },
+
+  "fusion_config": {
+    "imu": {
+      "update_rate_hz": 100,
+      "accel_range_g": 4,
+      "gyro_range_dps": 500,
+      "mag_range_ut": 1300,
+      "calibration": {
+        "accel_offset": [0.0, 0.0, 0.0],
+        "gyro_offset": [0.0, 0.0, 0.0],
+        "mag_offset": [0.0, 0.0, 0.0],
+        "mag_scale": [1.0, 1.0, 1.0]
+      }
+    },
+    "gps": {
+      "update_rate_hz": 10,
+      "timeout_ms": 1000,
+      "hdop_threshold": 2.0,
+      "min_satellites": 5
+    },
+    "odometry": {
+      "wheel_base": 0.5,
+      "wheel_radius": 0.1,
+      "ticks_per_revolution": 1560
+    },
+    "fusion_parameters": {
+      "update_rate_hz": 100,
+      "publish_rate_hz": 20,
+      "process_noise": {
+        "position": 0.1,
+        "velocity": 0.1,
+        "orientation": 0.01
+      },
+      "measurement_noise": {
+        "gps_position": 1.0,
+        "imu_accel": 0.1,
+        "imu_gyro": 0.01,
+        "odometry": 0.05
+      },
+      "filter_alpha": {
+        "velocity": 0.1,
+        "position": 0.1,
+        "orientation": 0.1
+      }
+    },
+    "tuning": {
+      "pid": {
+        "linear_kp": 1.0,
+        "linear_ki": 0.1,
+        "linear_kd": 0.01,
+        "angular_kp": 1.5,
+        "angular_ki": 0.2,
+        "angular_kd": 0.02
+      },
+      "kalman": {
+        "process_noise_pos": 0.1,
+        "process_noise_vel": 0.1,
+        "measurement_noise_gps": 1.0,
+        "measurement_noise_imu": 0.1,
+        "initial_covariance": 0.1
+      }
+    },
+    "mqtt_settings": {
+      "qos": 1,
+      "retain": false,
+      "keepalive": 60,
+      "broker_host": "localhost",
+      "broker_port": 1883,
+      "username": "mower",
+      "password": "smart"
+    },
+    "logging": {
+      "enabled": true,
+      "level": "info",
+      "file": "fusion.log",
+      "save_raw_data": false,
+      "data_dir": "/var/log/smartmower"
+    }
+  },
+
+  "gps_config": {
+    "uart_device": "/dev/ttyAMA2",
+    "baudrate": 115200,
+    "timeout_ms": 1000,
+    "protocol": "NMEA",
+    "max_satellites": 20
+  },
+
+  "vision": {
+    "camera": {
+      "device": "/dev/video0",
+      "width": 640,
+      "height": 480,
+      "fps": 30
+    },
+    "obstacle_detection": {
+      "min_contour_area": 100,
+      "threshold_value": 30,
+      "blur_size": 5,
+      "erode_iterations": 2,
+      "dilate_iterations": 2
+    },
+    "perimeter_detection": {
+      "warning_distance_m": 1.0,
+      "alert_distance_m": 0.5,
+      "max_distance_m": 3.0
+    }
+  },
+
+  "hardware": {
+    "motors": {
+      "left": {
+        "pwm_pin": 12,
+        "direction_pin1": 5,
+        "direction_pin2": 6
+      },
+      "right": {
+        "pwm_pin": 13,
+        "direction_pin1": 20,
+        "direction_pin2": 21
+      },
+      "gear_ratio": 30.0,
+      "encoder_ppr": 1560,
+      "max_rpm": 300
+    },
+    "odometry": {
+      "wheel_base": 0.5,
+      "wheel_radius": 0.1,
+      "ticks_per_revolution": 1560
+    }
+  },
+
+  "state_machine_config": {
+    "robot_parameters": {
+      "area": {
+        "total_area_sqm": 6000,
+        "dock_position": {
+          "x": 0.0,
+          "y": 0.0,
+          "theta": 0.0
+        }
+      },
+      "battery": {
+        "battery_profile": "lipo_3s",
+        "charging_threshold": 30.0,
+        "critical_threshold": 10.0
+      }
+    }
+  },
+
+  "unused": {
+    "metadata": {
+      "config_version": "1.0",
+      "robot_id": "smartmower_001",
+      "last_modified": "2025-01-01T00:00:00Z"
+    },
+    "battery_profiles": "Moved to unused - not referenced in code",
+    "tuning_speeds": "Moved to unused - not referenced in code",
+    "hardware_dimensions": "Moved to unused - not referenced in code",
+    "hardware_sensors": "Moved to unused - not referenced in code",
+    "hardware_actuators": "Moved to unused - not referenced in code",
+    "hardware_communication": "Moved to unused - not referenced in code",
+    "hardware_storage": "Moved to unused - not referenced in code",
+    "hardware_power_management": "Moved to unused - not referenced in code",
+    "state_machine_operating_modes": "Moved to unused - not referenced in code",
+    "state_machine_error_handling": "Moved to unused - not referenced in code",
+    "state_machine_safety_features": "Moved to unused - not referenced in code",
+    "state_machine_maintenance": "Moved to unused - not referenced in code"
+  }
+}

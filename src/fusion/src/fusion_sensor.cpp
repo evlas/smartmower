@@ -1,3 +1,4 @@
+#include "fusion_sensor.h"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -5,128 +6,164 @@
 #include <chrono>
 #include <thread>
 #include <atomic>
-#include <mutex>
 #include <queue>
 #include <cmath>
 #include <signal.h>
 #include <mosquitto.h>
 #include <json-c/json.h>
-#include <Eigen/Dense>
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
 // Fusion MQTT definitions
 #include "fusion_mqtt.h"
+#include <Eigen/Dense>
 
 using namespace std::chrono;
 using namespace Eigen;
 
-// Configuration structure
-struct FusionConfig {
-    struct {
-        int update_rate_hz;
-        int accel_range_g;
-        int gyro_range_dps;
-        int mag_range_ut;
-        struct {
-            Vector3d accel_offset;
-            Vector3d gyro_offset;
-            Vector3d mag_offset;
-            Vector3d mag_scale;
-        } calibration;
-    } imu;
-    
-    struct {
-        int update_rate_hz;
-        int timeout_ms;
-        double hdop_threshold;
-        int min_satellites;
-    } gps;
-    
-    struct {
-        double wheel_base;
-        double wheel_radius;
-        int ticks_per_revolution;
-    } odometry;
-    
-    struct {
-        int update_rate_hz;
-        int publish_rate_hz;
-        struct {
-            double position;
-            double velocity;
-            double orientation;
-        } process_noise;
-        struct {
-            double gps_position;
-            double imu_accel;
-            double imu_gyro;
-            double odometry;
-        } measurement_noise;
-        struct {
-            double velocity;
-            double position;
-            double orientation;
-        } filter_alpha;
-    } fusion_parameters;
-    
-    struct {
-        int qos;
-        bool retain;
-        int keepalive;
-        std::string broker_host;
-        int broker_port;
-        std::string username;
-        std::string password;
-    } mqtt_settings;
-    
-    struct {
-        bool enabled;
-        std::string level;
-        std::string file;
-        bool save_raw_data;
-        std::string data_dir;
-    } logging;
-};
-
 // Forward declarations
 void on_connect(struct mosquitto *mosq, void *obj, int rc);
 void on_message(struct mosquitto *mosq, void *obj, const struct mosquitto_message *msg);
-bool load_config(const std::string& filename);
 void signal_handler(int signum);
+bool load_config(const std::string& filename);
+void calculate_ticks_per_meter();
 
 // Global variables for signal handling
 std::atomic<bool> g_running{true};
 std::mutex g_mutex;
-FusionConfig g_config;
+FusionConfig g_config;  // Global configuration instance
 
-// MQTT callbacks will be defined after KalmanFilter class
+// La struttura FusionConfig è completamente definita in fusion_sensor.h
 
-// on_message function will be defined after KalmanFilter class
+// Funzione per calcolare i tick per metro
+void calculate_ticks_per_meter() {
+    if (g_config.odometry.wheel_radius > 0 && 
+        g_config.odometry.ticks_per_revolution > 0 && 
+        g_config.odometry.gear_ratio > 0) {
+        
+        double wheel_circumference = 2.0 * M_PI * g_config.odometry.wheel_radius;
+        double ticks_per_wheel_rev = g_config.odometry.ticks_per_revolution * 
+                                   g_config.odometry.gear_ratio;
+        g_config.odometry.ticks_per_meter = ticks_per_wheel_rev / wheel_circumference;
+        
+        // Log dei parametri calcolati
+        std::cout << "Odometry parameters:" << std::endl;
+        std::cout << "  Wheel radius: " << g_config.odometry.wheel_radius << " m" << std::endl;
+        std::cout << "  Ticks per revolution: " << g_config.odometry.ticks_per_revolution << std::endl;
+        std::cout << "  Gear ratio: " << g_config.odometry.gear_ratio << std::endl;
+        std::cout << "  Ticks per meter: " << g_config.odometry.ticks_per_meter << std::endl;
+    } else {
+        std::cerr << "Errore: parametri odometria non validi per il calcolo dei tick per metro" << std::endl;
+    }
+}
 
-// Load configuration from centralized robot_config.json
+// Funzione per caricare la configurazione
 bool load_config(const std::string& filename) {
-    // Set defaults
-    g_config.imu.update_rate_hz = 100;
-    g_config.imu.accel_range_g = 4;
-    g_config.imu.gyro_range_dps = 500;
-    g_config.imu.mag_range_ut = 4800;
-    g_config.imu.calibration.accel_offset = Vector3d::Zero();
-    g_config.imu.calibration.gyro_offset = Vector3d::Zero();
-    g_config.imu.calibration.mag_offset = Vector3d::Zero();
-    g_config.imu.calibration.mag_scale = Vector3d::Ones();
+    // Inizializzazione con valori di default
+    g_config = {
+        // IMU defaults
+        .imu = {
+            .update_rate_hz = 100,
+            .accel_range_g = 4,
+            .gyro_range_dps = 500,
+            .mag_range_ut = 1300,
+            .calibration = {
+                .accel_offset = {0.0, 0.0, 0.0},
+                .gyro_offset = {0.0, 0.0, 0.0},
+                .mag_offset = {0.0, 0.0, 0.0},
+                .mag_scale = {1.0, 1.0, 1.0}
+            }
+        },
+        // GPS defaults
+        .gps = {
+            .update_rate_hz = 10,
+            .timeout_ms = 2000,
+            .hdop_threshold = 2.0,
+            .min_satellites = 5
+        },
+        // Fusion parameters defaults
+        .fusion_parameters = {
+            .update_rate_hz = 100,
+            .publish_rate_hz = 50,
+            .process_noise = {
+                .position = 0.1,
+                .velocity = 0.1,
+                .orientation = 0.01
+            },
+            .measurement_noise = {
+                .gps_position = 1.0,
+                .imu_accel = 0.1,
+                .imu_gyro = 0.01,
+                .odometry = 0.05
+            },
+            .filter_alpha = {
+                .velocity = 0.2,
+                .position = 0.1,
+                .orientation = 0.3
+            }
+        },
+        // Logging defaults
+        .fusion_logging = {
+            .enabled = true,
+            .level = "info",
+            .file = "/var/log/smartmower/fusion_sensor.log",
+            .save_raw_data = false,
+            .data_dir = "/var/log/smartmower/data"
+        },
+        // MQTT defaults
+        .mqtt_settings = {
+            .broker_host = "localhost",
+            .broker_port = 1883,
+            .username = "",
+            .password = "",
+            .client_id = "fusion_sensor",
+            .base_topic = "smartmower/fusion",
+            .qos = 1,
+            .retain = false,
+            .keepalive = 60
+        },
+        // Odometry defaults
+        .odometry = {
+            .wheel_radius = 0.1,           // Valore di esempio in metri
+            .ticks_per_revolution = 1000,  // Valore di esempio
+            .gear_ratio = 30.0,            // Valore di esempio
+            .wheel_base = 0.5,             // Valore di esempio in metri
+            .wheel_track = 0.3,            // Valore di esempio in metri
+            .ticks_per_meter = 0.0         // Sarà calcolato successivamente
+        },
+        // Safety defaults
+        .safety = {
+            .emergency_stop_enabled = true,
+            .lift_sensor_enabled = true,
+            .max_linear_velocity = 0.5,     // 0.5 m/s
+            .max_angular_velocity = 1.0,    // 1.0 rad/s
+            .max_tilt_angle = 15.0,         // 15 gradi
+            .max_voltage = 29.4,            // 29.4V (esempio per batteria 24V)
+            .min_voltage = 21.0,            // 21.0V (soglia di scarica)
+            .max_motor_temp = 80.0          // 80°C massimi
+        }
+    };
+    // Inizializzazione degli array di calibrazione
+    for (int i = 0; i < 3; i++) {
+        g_config.imu.calibration.accel_offset[i] = 0.0;
+        g_config.imu.calibration.gyro_offset[i] = 0.0;
+        g_config.imu.calibration.mag_offset[i] = 0.0;
+        g_config.imu.calibration.mag_scale[i] = 1.0;
+    }
     
+    // GPS defaults
     g_config.gps.update_rate_hz = 5;
     g_config.gps.timeout_ms = 2000;
     g_config.gps.hdop_threshold = 3.0;
     g_config.gps.min_satellites = 4;
     
+    // Odometry defaults
     g_config.odometry.wheel_base = 0.5;
     g_config.odometry.wheel_radius = 0.1;
     g_config.odometry.ticks_per_revolution = 1000;
     
+    // Fusion parameters defaults
     g_config.fusion_parameters.update_rate_hz = 100;
     g_config.fusion_parameters.publish_rate_hz = 20;
     g_config.fusion_parameters.process_noise.position = 0.1;
@@ -140,19 +177,21 @@ bool load_config(const std::string& filename) {
     g_config.fusion_parameters.filter_alpha.position = 0.1;
     g_config.fusion_parameters.filter_alpha.orientation = 0.3;
     
+    // MQTT defaults (from root level in robot_config.json)
     g_config.mqtt_settings.qos = 1;
-    g_config.mqtt_settings.retain = true;
+    g_config.mqtt_settings.retain = false;
     g_config.mqtt_settings.keepalive = 60;
     g_config.mqtt_settings.broker_host = "localhost";
     g_config.mqtt_settings.broker_port = 1883;
-    g_config.mqtt_settings.username = "";
-    g_config.mqtt_settings.password = "";
+    g_config.mqtt_settings.username = "mower";
+    g_config.mqtt_settings.password = "smart";
     
-    g_config.logging.enabled = true;
-    g_config.logging.level = "info";
-    g_config.logging.file = "/opt/smartmower/log/fusion_sensor.log";
-    g_config.logging.save_raw_data = false;
-    g_config.logging.data_dir = "/opt/smartmower/data/fusion";
+    // Logging defaults
+    g_config.fusion_logging.enabled = true;
+    g_config.fusion_logging.level = "info";
+    g_config.fusion_logging.file = "/var/log/smartmower/fusion.log";
+    g_config.fusion_logging.save_raw_data = false;
+    g_config.fusion_logging.data_dir = "/var/log/smartmower";
     
     // Load from centralized config file
     json_object* root = json_object_from_file(filename.c_str());
@@ -161,10 +200,9 @@ bool load_config(const std::string& filename) {
         return true;
     }
     
-    json_object* tuning;
-    if (json_object_object_get_ex(root, "tuning", &tuning)) {
-        json_object* fusion_config;
-        if (json_object_object_get_ex(tuning, "fusion_config", &fusion_config)) {
+    // Get fusion_config directly from root
+    json_object* fusion_config;
+    if (json_object_object_get_ex(root, "fusion_config", &fusion_config)) {
             // Parse IMU config
             json_object* imu_obj;
             if (json_object_object_get_ex(fusion_config, "imu", &imu_obj)) {
@@ -289,56 +327,157 @@ bool load_config(const std::string& filename) {
             }
         }
         
-        // Parse fusion logging
-        json_object* fusion_logging;
-        if (json_object_object_get_ex(tuning, "fusion_logging", &fusion_logging)) {
-            json_object* val;
-            if (json_object_object_get_ex(fusion_logging, "enabled", &val))
-                g_config.logging.enabled = json_object_get_boolean(val);
-            if (json_object_object_get_ex(fusion_logging, "level", &val))
-                g_config.logging.level = json_object_get_string(val);
-            if (json_object_object_get_ex(fusion_logging, "file", &val))
-                g_config.logging.file = json_object_get_string(val);
-            if (json_object_object_get_ex(fusion_logging, "save_raw_data", &val))
-                g_config.logging.save_raw_data = json_object_get_boolean(val);
-            if (json_object_object_get_ex(fusion_logging, "data_dir", &val))
-                g_config.logging.data_dir = json_object_get_string(val);
-        }
+        // Parse logging settings from root
+    json_object* logging_obj;
+    if (json_object_object_get_ex(root, "fusion_logging", &logging_obj)) {
+        json_object* val;
+        if (json_object_object_get_ex(logging_obj, "enabled", &val))
+            g_config.fusion_logging.enabled = json_object_get_boolean(val);
+        if (json_object_object_get_ex(logging_obj, "level", &val))
+            g_config.fusion_logging.level = json_object_get_string(val);
+        if (json_object_object_get_ex(logging_obj, "file", &val))
+            g_config.fusion_logging.file = json_object_get_string(val);
+        if (json_object_object_get_ex(logging_obj, "save_raw_data", &val))
+            g_config.fusion_logging.save_raw_data = json_object_get_boolean(val);
+        if (json_object_object_get_ex(logging_obj, "data_dir", &val))
+            g_config.fusion_logging.data_dir = json_object_get_string(val);
     }
     
-    // Parse MQTT broker settings from system.communication section
-    json_object* system_obj;
-    if (json_object_object_get_ex(root, "system", &system_obj)) {
-        json_object* comm_obj;
-        if (json_object_object_get_ex(system_obj, "communication", &comm_obj)) {
-            json_object* mqtt_val;
-            if (json_object_object_get_ex(comm_obj, "mqtt_broker_host", &mqtt_val))
-                g_config.mqtt_settings.broker_host = json_object_get_string(mqtt_val);
-            if (json_object_object_get_ex(comm_obj, "mqtt_broker_port", &mqtt_val))
-                g_config.mqtt_settings.broker_port = json_object_get_int(mqtt_val);
-            if (json_object_object_get_ex(comm_obj, "mqtt_username", &mqtt_val))
-                g_config.mqtt_settings.username = json_object_get_string(mqtt_val);
-            if (json_object_object_get_ex(comm_obj, "mqtt_password", &mqtt_val))
-                g_config.mqtt_settings.password = json_object_get_string(mqtt_val);
-        }
+    // Parse MQTT settings from root
+    json_object* mqtt_obj;
+    if (json_object_object_get_ex(root, "mqtt_settings", &mqtt_obj)) {
+        json_object* val;
+        
+        // Inizializza i valori di default per MQTT
+        g_config.mqtt_settings.broker_host = "localhost";
+        g_config.mqtt_settings.broker_port = 1883;
+        g_config.mqtt_settings.username = "";
+        g_config.mqtt_settings.password = "";
+        g_config.mqtt_settings.client_id = "fusion_sensor";
+        g_config.mqtt_settings.base_topic = "smartmower/fusion";
+        g_config.mqtt_settings.qos = 1;
+        g_config.mqtt_settings.retain = false;
+        g_config.mqtt_settings.keepalive = 60;
+        if (json_object_object_get_ex(mqtt_obj, "qos", &val))
+            g_config.mqtt_settings.qos = json_object_get_int(val);
+        if (json_object_object_get_ex(mqtt_obj, "retain", &val))
+            g_config.mqtt_settings.retain = json_object_get_boolean(val);
+        if (json_object_object_get_ex(mqtt_obj, "keepalive", &val))
+            g_config.mqtt_settings.keepalive = json_object_get_int(val);
+        if (json_object_object_get_ex(mqtt_obj, "broker", &val))
+            g_config.mqtt_settings.broker_host = json_object_get_string(val);
+        if (json_object_object_get_ex(mqtt_obj, "port", &val))
+            g_config.mqtt_settings.broker_port = json_object_get_int(val);
+        if (json_object_object_get_ex(mqtt_obj, "username", &val))
+            g_config.mqtt_settings.username = json_object_get_string(val);
+        if (json_object_object_get_ex(mqtt_obj, "password", &val))
+            g_config.mqtt_settings.password = json_object_get_string(val);
     }
     
     json_object_put(root);
     
+    // Stampa la configurazione caricata per debug
     std::cout << "Fusion Config loaded:" << std::endl;
     std::cout << "  IMU: " << g_config.imu.update_rate_hz << "Hz, " 
-              << g_config.imu.accel_range_g << "g, " 
-              << g_config.imu.gyro_range_dps << "dps" << std::endl;
+              << g_config.imu.accel_range_g << "g, " << g_config.imu.gyro_range_dps << "dps, " 
+              << g_config.imu.mag_range_ut << "uT" << std::endl;
+    std::cout << "  IMU Calibration:" << std::endl;
+    std::cout << "    Accel offset: [" 
+              << g_config.imu.calibration.accel_offset[0] << ", " 
+              << g_config.imu.calibration.accel_offset[1] << ", " 
+              << g_config.imu.calibration.accel_offset[2] << "]" << std::endl;
+    std::cout << "    Gyro offset: [" 
+              << g_config.imu.calibration.gyro_offset[0] << ", " 
+              << g_config.imu.calibration.gyro_offset[1] << ", " 
+              << g_config.imu.calibration.gyro_offset[2] << "]" << std::endl;
+    std::cout << "    Mag offset: [" 
+              << g_config.imu.calibration.mag_offset[0] << ", " 
+              << g_config.imu.calibration.mag_offset[1] << ", " 
+              << g_config.imu.calibration.mag_offset[2] << "]" << std::endl;
+    std::cout << "    Mag scale: [" 
+              << g_config.imu.calibration.mag_scale[0] << ", " 
+              << g_config.imu.calibration.mag_scale[1] << ", " 
+              << g_config.imu.calibration.mag_scale[2] << "]" << std::endl;
     std::cout << "  GPS: " << g_config.gps.update_rate_hz << "Hz, " 
               << g_config.gps.min_satellites << " sats min" << std::endl;
     std::cout << "  Fusion: " << g_config.fusion_parameters.update_rate_hz << "Hz update, " 
               << g_config.fusion_parameters.publish_rate_hz << "Hz publish" << std::endl;
     std::cout << "  MQTT: " << g_config.mqtt_settings.broker_host << ":" << g_config.mqtt_settings.broker_port
               << " (user: " << g_config.mqtt_settings.username << ")" << std::endl;
-    std::cout << "  Logging: " << g_config.logging.level << " -> " 
-              << g_config.logging.file << std::endl;
+    std::cout << "  Logging: " << g_config.fusion_logging.level << " -> " 
+              << g_config.fusion_logging.file << std::endl;
+
     
     return true;
+}
+
+// Inizializza la configurazione di default
+void init_default_config() {
+    // Configurazione IMU di default
+    g_config.imu.update_rate_hz = 100;
+    g_config.imu.accel_range_g = 4;
+    g_config.imu.gyro_range_dps = 500;
+    g_config.imu.mag_range_ut = 4800;
+    
+    // Azzera i valori di calibrazione
+    for (int i = 0; i < 3; ++i) {
+        g_config.imu.calibration.accel_offset[i] = 0.0;
+        g_config.imu.calibration.gyro_offset[i] = 0.0;
+        g_config.imu.calibration.mag_offset[i] = 0.0;
+        g_config.imu.calibration.mag_scale[i] = 1.0;
+    }
+    
+    // Configurazione GPS di default
+    g_config.gps.update_rate_hz = 5;
+    g_config.gps.timeout_ms = 2000;
+    g_config.gps.hdop_threshold = 3.0;
+    g_config.gps.min_satellites = 4;
+    
+    // Configurazione odometria di default
+    g_config.odometry.wheel_base = 0.35;
+    g_config.odometry.wheel_radius = 0.1;
+    g_config.odometry.ticks_per_revolution = 12;
+    g_config.odometry.gear_ratio = 185.0;
+    calculate_ticks_per_meter();
+    
+    // Configurazione parametri di fusione di default
+    g_config.fusion_parameters.update_rate_hz = 100;
+    g_config.fusion_parameters.publish_rate_hz = 20;
+    g_config.fusion_parameters.process_noise.position = 0.1;
+    g_config.fusion_parameters.process_noise.velocity = 0.1;
+    g_config.fusion_parameters.process_noise.orientation = 0.01;
+    g_config.fusion_parameters.measurement_noise.gps_position = 1.0;
+    g_config.fusion_parameters.measurement_noise.imu_accel = 0.1;
+    g_config.fusion_parameters.measurement_noise.imu_gyro = 0.01;
+    g_config.fusion_parameters.measurement_noise.odometry = 0.05;
+    g_config.fusion_parameters.filter_alpha.velocity = 0.2;
+    g_config.fusion_parameters.filter_alpha.position = 0.1;
+    g_config.fusion_parameters.filter_alpha.orientation = 0.3;
+    
+    // Configurazione MQTT di default
+    g_config.mqtt_settings.broker_host = "localhost";
+    g_config.mqtt_settings.broker_port = 1883;
+    g_config.mqtt_settings.username = "";
+    g_config.mqtt_settings.password = "";
+    g_config.mqtt_settings.client_id = "fusion_sensor";
+    g_config.mqtt_settings.base_topic = "smartmower/fusion";
+    g_config.mqtt_settings.qos = 1;
+    g_config.mqtt_settings.retain = false;
+    g_config.mqtt_settings.keepalive = 60;
+    
+    // Configurazione logging di default
+    g_config.fusion_logging.enabled = true;
+    g_config.fusion_logging.level = "info";
+    g_config.fusion_logging.file = "/var/log/fusion_sensor.log";
+    g_config.fusion_logging.save_raw_data = false;
+    g_config.fusion_logging.data_dir = "/var/lib/fusion_sensor";
+    
+    // Configurazione sicurezza di default
+    g_config.safety.emergency_stop_enabled = true;
+    g_config.safety.lift_sensor_enabled = true;
+    g_config.safety.max_linear_velocity = 0.5;     // 0.5 m/s
+    g_config.safety.max_angular_velocity = 1.0;    // 1.0 rad/s
+    g_config.safety.max_tilt_angle = 15.0;         // 15 gradi
 }
 
 // Signal handler for clean shutdown
@@ -710,8 +849,12 @@ void on_message(struct mosquitto */*mosq*/, void */*obj*/, const struct mosquitt
                         
                         // Applica calibrazione se disponibile
                         if (imu_data.size() >= 6) {
-                            imu_data.segment(0, 3) -= g_config.imu.calibration.accel_offset;
-                            imu_data.segment(3, 3) -= g_config.imu.calibration.gyro_offset;
+                            for (int i = 0; i < 3; ++i) {
+                                imu_data(i) -= g_config.imu.calibration.accel_offset[i];
+                            }
+                            for (int i = 0; i < 3; ++i) {
+                                imu_data(i+3) -= g_config.imu.calibration.gyro_offset[i];
+                            }
                         }
                         
                         // Aggiorna il filtro di Kalman con i dati IMU
