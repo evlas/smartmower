@@ -757,10 +757,28 @@
           "grass_high_h": 90,
           "min_saturation": 40,
           "min_value": 40,
-          "min_grass_area": 100
+          "min_grass_area": 100,
+          "morphological": {
+            "kernel_size": 5,
+            "kernel_type": "ellipse"
+          },
+          "height": {
+            "min_cm": 0.5,
+            "max_cm": 25.0
+          },
+          "processing": {
+            "frame_timeout_ms": 100
+          },
+          "visualization": {
+            "grass_color": [0, 200, 0],
+            "overlay_alpha": 0.3,
+            "text_color": [255, 255, 255],
+            "text_thickness": 2,
+            "text_scale": 0.7
+          }
         },
-        "height": 5.0,
-        "density": "medium"
+        "debug_enabled": false,
+        "log_level": "info"
       }
     }
   },

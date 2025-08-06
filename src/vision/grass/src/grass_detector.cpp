@@ -53,20 +53,40 @@ struct Config {
     double camera_height_cm = 30.0;
     
     // Grass detection parameters
-    int grass_low_h = 30;        // Lower bound for green in HSV (Hue)
-    int grass_high_h = 90;       // Upper bound for green in HSV (Hue)
-    int min_saturation = 40;     // Minimum saturation to filter grays
-    int min_value = 40;          // Minimum value to filter dark colors
-    int min_grass_area = 100;    // Minimum contour area to be considered grass
+    int grass_low_h = 30;          // Lower H value for green color (HSV)
+    int grass_high_h = 90;         // Upper H value for green color (HSV)
+    int min_saturation = 40;       // Minimum saturation for green color
+    int min_value = 40;            // Minimum value for green color
+    int min_grass_area = 100;      // Minimum area to be considered as grass (in pixels)
     
-    // Debug settings
-    bool debug_enabled = true;
-    std::string log_level = "info";
+    // Morphological operations
+    int morph_kernel_size = 5;     // Size of the kernel for morphological operations
+    std::string morph_kernel_type = "ellipse"; // Type of morphological kernel (ellipse/rect/cross)
+    
+    // Texture analysis
+    double min_grass_height = 0.5;  // Minimum grass height in cm
+    double max_grass_height = 25.0; // Maximum grass height in cm
+    
+    // Processing
+    int frame_timeout_ms = 100;     // Timeout for frame waiting in ms
+    
+    // Debug and visualization
+    bool debug_enabled = false;    // Enable debug output and visualization
+    std::string log_level = "info"; // Logging level
+    
+    // Visualization parameters
+    struct {
+        cv::Scalar grass_color = cv::Scalar(0, 200, 0); // BGR color for grass overlay
+        double overlay_alpha = 0.3;                      // Alpha for overlay blending
+        cv::Scalar text_color = cv::Scalar(255, 255, 255); // Text color
+        int text_thickness = 2;                          // Text thickness
+        double text_scale = 0.7;                         // Text scale
+    } visualization;
     
     bool loadFromFile(const std::string& filename = "/opt/smartmower/etc/config/robot_config.json") {
         std::ifstream file(filename);
         if (!file.is_open()) {
-            std::cout << "Using default configuration (robot_config.json not found)" << std::endl;
+            std::cout << "Using default configuration (" << filename << " not found)" << std::endl;
             return true;
         }
         
@@ -75,59 +95,147 @@ struct Config {
         
         cJSON* root = cJSON_Parse(content.c_str());
         if (!root) {
-            std::cerr << "Error parsing robot_config.json" << std::endl;
+            std::cerr << "Error parsing " << filename << std::endl;
             return false;
         }
         
-        // Parse MQTT settings from unified configuration
-        cJSON* system = cJSON_GetObjectItemCaseSensitive(root, "system");
-        if (system) {
-            cJSON* communication = cJSON_GetObjectItemCaseSensitive(system, "communication");
-            if (communication) {
-                cJSON* mqtt_broker_host = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_host");
-                cJSON* mqtt_broker_port = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_broker_port");
-                cJSON* mqtt_username = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_username");
-                cJSON* mqtt_password = cJSON_GetObjectItemCaseSensitive(communication, "mqtt_password");
+        // 1. Parse MQTT settings
+        cJSON* mqtt = cJSON_GetObjectItem(root, "mqtt");
+        if (mqtt) {
+            // Basic MQTT connection settings
+            if (cJSON_IsString(cJSON_GetObjectItem(mqtt, "broker"))) 
+                this->mqtt_broker = cJSON_GetObjectItem(mqtt, "broker")->valuestring;
+            if (cJSON_IsNumber(cJSON_GetObjectItem(mqtt, "port")))
+                this->mqtt_port = cJSON_GetObjectItem(mqtt, "port")->valueint;
+            if (cJSON_IsString(cJSON_GetObjectItem(mqtt, "username")))
+                this->mqtt_username = cJSON_GetObjectItem(mqtt, "username")->valuestring;
+            if (cJSON_IsString(cJSON_GetObjectItem(mqtt, "password")))
+                this->mqtt_password = cJSON_GetObjectItem(mqtt, "password")->valuestring;
+            
+            // Load MQTT topics configuration
+            cJSON* topics = cJSON_GetObjectItem(mqtt, "topics");
+            if (topics) {
+                // Camera topic (for subscription)
+                cJSON* camera_topic = cJSON_GetObjectItem(topics, "camera");
+                if (camera_topic) {
+                    std::string base_topic = cJSON_GetObjectItem(camera_topic, "base")->valuestring;
+                    cJSON* subtopics = cJSON_GetObjectItem(camera_topic, "subtopics");
+                    if (subtopics) {
+                        // Use frame subtopic if available, otherwise use base topic
+                        cJSON* frame_subtopic = cJSON_GetObjectItem(subtopics, "frame");
+                        if (frame_subtopic) {
+                            this->mqtt_subscribe_topic = base_topic + "/" + frame_subtopic->valuestring;
+                        } else {
+                            this->mqtt_subscribe_topic = base_topic;
+                        }
+                    } else {
+                        this->mqtt_subscribe_topic = base_topic;
+                    }
+                }
                 
-                if (cJSON_IsString(mqtt_broker_host)) this->mqtt_broker = mqtt_broker_host->valuestring;
-                if (cJSON_IsNumber(mqtt_broker_port)) this->mqtt_port = mqtt_broker_port->valueint;
-                if (cJSON_IsString(mqtt_username)) this->mqtt_username = mqtt_username->valuestring;
-                if (cJSON_IsString(mqtt_password)) this->mqtt_password = mqtt_password->valuestring;
+                // Grass topic (for publishing)
+                cJSON* grass_topic = cJSON_GetObjectItem(topics, "grass");
+                if (grass_topic) {
+                    std::string base_topic = cJSON_GetObjectItem(grass_topic, "base")->valuestring;
+                    cJSON* subtopics = cJSON_GetObjectItem(grass_topic, "subtopics");
+                    if (subtopics) {
+                        // Use detection subtopic if available, otherwise use base topic
+                        cJSON* detection_subtopic = cJSON_GetObjectItem(subtopics, "detection");
+                        if (detection_subtopic) {
+                            this->mqtt_publish_topic = base_topic + "/" + detection_subtopic->valuestring;
+                        } else {
+                            this->mqtt_publish_topic = base_topic;
+                        }
+                    } else {
+                        this->mqtt_publish_topic = base_topic;
+                    }
+                }
             }
         }
         
-        // Load grass detection configuration from centralized structure (optional)
-        cJSON* modules = cJSON_GetObjectItem(root, "modules");
-        if (!modules) {
-            std::cout << "modules section not found, using default grass detection parameters" << std::endl;
-        } else {
-        
-            cJSON* vision = cJSON_GetObjectItem(modules, "vision");
-            if (!vision) {
-                std::cout << "vision section not found in modules, using default parameters" << std::endl;
-            } else {
-        
-        if (cJSON* grass = cJSON_GetObjectItem(vision, "grass")) {
-            // Load detection parameters
-            if (cJSON* detection = cJSON_GetObjectItem(grass, "detection")) {
-                if (cJSON* hsv_lower = cJSON_GetObjectItem(detection, "hsv_lower")) {
-                    if (cJSON_IsArray(hsv_lower) && cJSON_GetArraySize(hsv_lower) >= 3) {
-                        grass_low_h = cJSON_GetArrayItem(hsv_lower, 0)->valueint;
-                    }
-                }
-                if (cJSON* hsv_upper = cJSON_GetObjectItem(detection, "hsv_upper")) {
-                    if (cJSON_IsArray(hsv_upper) && cJSON_GetArraySize(hsv_upper) >= 3) {
-                        grass_high_h = cJSON_GetArrayItem(hsv_upper, 0)->valueint;
-                    }
-                }
-                if (cJSON* min_area = cJSON_GetObjectItem(detection, "min_area"))
-                    min_grass_area = min_area->valueint;
+        // 2. Load camera parameters
+        if (cJSON* camera = cJSON_GetObjectItem(root, "camera")) {
+            // Get camera height (convert from meters to cm)
+            if (cJSON* height = cJSON_GetObjectItem(camera, "height_m"))
+                camera_height_cm = height->valuedouble * 100.0;
+                
+            // Get focal length from intrinsics
+            if (cJSON* intrinsics = cJSON_GetObjectItem(camera, "intrinsics")) {
+                if (cJSON* fl = cJSON_GetObjectItem(intrinsics, "focal_length"))
+                    focal_length = fl->valuedouble;
             }
         }
-            } // end vision section
-        } // end modules section
         
-        // Load logging configuration
+        // 3. Load grass detection parameters
+        if (cJSON* vision = cJSON_GetObjectItem(root, "vision")) {
+            if (cJSON* grass_detection = cJSON_GetObjectItem(vision, "grass_detection")) {
+                if (cJSON* params = cJSON_GetObjectItem(grass_detection, "parameters")) {
+                    // Get HSV and area parameters
+                    if (cJSON* low_h = cJSON_GetObjectItem(params, "grass_low_h"))
+                        grass_low_h = low_h->valueint;
+                    if (cJSON* high_h = cJSON_GetObjectItem(params, "grass_high_h"))
+                        grass_high_h = high_h->valueint;
+                    if (cJSON* min_sat = cJSON_GetObjectItem(params, "min_saturation"))
+                        min_saturation = min_sat->valueint;
+                    if (cJSON* min_val = cJSON_GetObjectItem(params, "min_value"))
+                        min_value = min_val->valueint;
+                    if (cJSON* min_area = cJSON_GetObjectItem(params, "min_grass_area"))
+                        min_grass_area = min_area->valueint;
+                    
+                    // Load morphological operations parameters
+                    if (cJSON* morph = cJSON_GetObjectItem(params, "morphological")) {
+                        if (cJSON* ksize = cJSON_GetObjectItem(morph, "kernel_size"))
+                            morph_kernel_size = ksize->valueint;
+                        if (cJSON* ktype = cJSON_GetObjectItem(morph, "kernel_type"))
+                            morph_kernel_type = ktype->valuestring;
+                    }
+                    
+                    // Load grass height parameters
+                    if (cJSON* height = cJSON_GetObjectItem(params, "height")) {
+                        if (cJSON* min_h = cJSON_GetObjectItem(height, "min_cm"))
+                            min_grass_height = min_h->valuedouble;
+                        if (cJSON* max_h = cJSON_GetObjectItem(height, "max_cm"))
+                            max_grass_height = max_h->valuedouble;
+                    }
+                    
+                    // Load processing parameters
+                    if (cJSON* proc = cJSON_GetObjectItem(params, "processing")) {
+                        if (cJSON* timeout = cJSON_GetObjectItem(proc, "frame_timeout_ms"))
+                            frame_timeout_ms = timeout->valueint;
+                    }
+                    
+                    // Load visualization parameters
+                    if (cJSON* vis = cJSON_GetObjectItem(params, "visualization")) {
+                        if (cJSON* color = cJSON_GetObjectItem(vis, "grass_color")) {
+                            if (cJSON_IsArray(color) && cJSON_GetArraySize(color) == 3) {
+                                visualization.grass_color = cv::Scalar(
+                                    cJSON_GetArrayItem(color, 0)->valueint,
+                                    cJSON_GetArrayItem(color, 1)->valueint,
+                                    cJSON_GetArrayItem(color, 2)->valueint
+                                );
+                            }
+                        }
+                        if (cJSON* alpha = cJSON_GetObjectItem(vis, "overlay_alpha"))
+                            visualization.overlay_alpha = alpha->valuedouble;
+                        if (cJSON* text = cJSON_GetObjectItem(vis, "text_color")) {
+                            if (cJSON_IsArray(text) && cJSON_GetArraySize(text) == 3) {
+                                visualization.text_color = cv::Scalar(
+                                    cJSON_GetArrayItem(text, 0)->valueint,
+                                    cJSON_GetArrayItem(text, 1)->valueint,
+                                    cJSON_GetArrayItem(text, 2)->valueint
+                                );
+                            }
+                        }
+                        if (cJSON* thickness = cJSON_GetObjectItem(vis, "text_thickness"))
+                            visualization.text_thickness = thickness->valueint;
+                        if (cJSON* scale = cJSON_GetObjectItem(vis, "text_scale"))
+                            visualization.text_scale = scale->valuedouble;
+                    }
+                }
+            }
+        }
+        
+        // 4. Load logging configuration
         if (cJSON* logging = cJSON_GetObjectItem(root, "logging")) {
             if (cJSON* enabled = cJSON_GetObjectItem(logging, "enabled"))
                 debug_enabled = cJSON_IsTrue(enabled);
@@ -337,8 +445,9 @@ private:
         std::chrono::system_clock::time_point current_timestamp;
         
         while (running_.load()) {
-            // Wait for new frame with timeout
-            if (!frame_buffer_.waitForFrame(current_frame, current_timestamp, std::chrono::milliseconds(100))) {
+            // Wait for new frame with configured timeout
+            if (!frame_buffer_.waitForFrame(current_frame, current_timestamp, 
+                                          std::chrono::milliseconds(config_.frame_timeout_ms))) {
                 continue;
             }
             
@@ -430,7 +539,19 @@ private:
         cv::inRange(hsv, lower_green, upper_green, mask);
         
         // Apply morphological operations to clean up the mask
-        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+        int kernel_shape;
+        if (config_.morph_kernel_type == "rect") {
+            kernel_shape = cv::MORPH_RECT;
+        } else if (config_.morph_kernel_type == "cross") {
+            kernel_shape = cv::MORPH_CROSS;
+        } else { // default to ellipse
+            kernel_shape = cv::MORPH_ELLIPSE;
+        }
+        
+        cv::Mat kernel = cv::getStructuringElement(
+            kernel_shape, 
+            cv::Size(config_.morph_kernel_size, config_.morph_kernel_size)
+        );
         cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel);
         cv::morphologyEx(mask, mask, cv::MORPH_CLOSE, kernel);
         
@@ -518,19 +639,21 @@ private:
         double texture_variation = std_grad[0] / 20.0;     // Texture uniformity
         double position_factor = 1.0 - distance_from_bottom; // Closer to camera = higher
         
-        // Combine factors with weights
-        double base_height = 2.0; // Minimum grass height
-        double height_from_texture = texture_complexity * 3.0;        // 0-9 cm from texture
-        double height_from_variation = texture_variation * 2.0;       // 0-6 cm from variation  
-        double height_from_density = grass_density * 4.0;             // 0-4 cm from density
-        double height_from_position = position_factor * 6.0;          // 0-6 cm from position
+        // Calculate height factors based on configuration
+        double height_range = config_.max_grass_height - config_.min_grass_height;
         
-        double estimated_height = base_height + height_from_texture + 
-                                 height_from_variation + height_from_density + 
-                                 height_from_position;
+        // Combine factors with weights (all factors are 0-1 range)
+        double height_from_texture = texture_complexity * 0.3;         // Texture complexity (0-30% of range)
+        double height_from_variation = texture_variation * 0.2;        // Texture variation (0-20% of range)
+        double height_from_density = grass_density * 0.2;              // Grass density (0-20% of range)
+        double height_from_position = position_factor * 0.3;           // Position in frame (0-30% of range)
         
-        // Apply realistic bounds for grass height
-        estimated_height = std::max(0.5, std::min(25.0, estimated_height));
+        // Calculate final height within configured bounds
+        double height_factor = height_from_texture + height_from_variation + 
+                             height_from_density + height_from_position;
+        
+        // Scale to configured height range and add minimum height
+        double estimated_height = config_.min_grass_height + (height_factor * height_range);
         
         if (config_.debug_enabled) {
             std::cout << "[TEXTURE] Grad:" << texture_complexity 
@@ -547,23 +670,33 @@ private:
         // Create colored overlay for grass regions
         cv::Mat overlay;
         cv::cvtColor(grass_mask, overlay, cv::COLOR_GRAY2BGR);
-        overlay.setTo(cv::Scalar(0, 200, 0), grass_mask); // Green overlay
+        overlay.setTo(config_.visualization.grass_color, grass_mask);
         
-        // Blend with original image
-        cv::addWeighted(result.visualization, 0.7, overlay, 0.3, 0, result.visualization);
+        // Blend with original image using configured alpha
+        cv::addWeighted(result.visualization, 1.0 - config_.visualization.overlay_alpha, 
+                       overlay, config_.visualization.overlay_alpha, 
+                       0, result.visualization);
         
         // Add text information
         std::string info = cv::format("Grass: %.1f cm (%.1f%%) - %d pixels", 
                                      result.height_cm, result.coverage, result.grass_pixels);
-        cv::putText(result.visualization, info, cv::Point(10, 30), 
-                   cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+        cv::putText(result.visualization, info, 
+                   cv::Point(10, 30), 
+                   cv::FONT_HERSHEY_SIMPLEX, 
+                   config_.visualization.text_scale, 
+                   config_.visualization.text_color, 
+                   config_.visualization.text_thickness);
         
         // Add timestamp
         auto time_t = std::chrono::system_clock::to_time_t(result.timestamp);
         std::string time_str = std::ctime(&time_t);
         time_str.pop_back(); // Remove newline
-        cv::putText(result.visualization, time_str, cv::Point(10, result.visualization.rows - 20), 
-                   cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1);
+        cv::putText(result.visualization, time_str, 
+                   cv::Point(10, result.visualization.rows - 20), 
+                   cv::FONT_HERSHEY_SIMPLEX, 
+                   config_.visualization.text_scale * 0.7, 
+                   config_.visualization.text_color, 
+                   config_.visualization.text_thickness);
     }
     
     void publishGrassInfo(const GrassInfo& grass_info) {
