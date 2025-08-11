@@ -1,0 +1,14 @@
+[Unit]
+Description=SmartMower Pico Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/smartmower
+ExecStart=/opt/smartmower/bin/pico_bridge
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

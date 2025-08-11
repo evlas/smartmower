@@ -1,6 +1,0 @@
-g++ -std=c++17 -Wall -Wextra -O3 -Iinclude -I/usr/local/include -I/usr/include/eigen3 -I/usr/include/json-c -DJSON_C_VERSION=0x0d0e0a -c -o obj/fusion_sensor.o src/fusion_sensor.cpp
-src/fusion_sensor.cpp: In function ‘void update_kalman_noise_models()’:
-src/fusion_sensor.cpp:513:12: warning: variable ‘imu_noise_scale’ set but not used [-Wunused-but-set-variable]
-  513 |     double imu_noise_scale = 1.0;
-      |            ^~~~~~~~~~~~~~~
-g++ -o bin/fusion_sensor obj/fusion_sensor.o -lmosquitto -ljson-c -lpthread -lm

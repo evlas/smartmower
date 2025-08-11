@@ -1,0 +1,17 @@
+[Unit]
+Description=Fusion Bridge Service
+After=network.target mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/smartmower
+ExecStart=/opt/smartmower/bin/fusion_bridge
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=fusion_bridge
+
+[Install]
+WantedBy=multi-user.target

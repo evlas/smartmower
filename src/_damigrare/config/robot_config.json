@@ -48,11 +48,11 @@
         "retain": false
       },
       "pico": {
-        "base": "bridge/pico",
+        "base": "smartmower/pico",
         "subtopics": {
-          "data": "data",
+          "data": "sensors",
           "status": "status",
-          "commands": "commands"
+          "commands": "cmd"
         },
         "qos": 1,
         "retain": false,
@@ -60,11 +60,11 @@
         "client_id": "pico_bridge"
       },
       "gps": {
-        "base": "bridge/gps",
+        "base": "smartmower/gps",
         "subtopics": {
           "data": "data",
           "status": "status",
-          "commands": "commands"
+          "commands": "cmd"
         },
         "qos": 1,
         "retain": false,
