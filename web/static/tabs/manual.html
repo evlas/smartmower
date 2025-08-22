@@ -1,0 +1,60 @@
+<section class="tab-panel" aria-labelledby="tab-manuale">
+  <h2 id="tab-manuale">Controllo Manuale</h2>
+
+  <div class="panel">
+    <div class="row spread">
+      <div class="row gap">
+        <button id="btn-enter-manual" class="primary">Entra in Manuale</button>
+        <button id="btn-exit-manual" class="warning">Esci dal Manuale</button>
+      </div>
+      <div class="badge" title="Suggerimento: usa W/A/S/D e Spazio">
+        🕹️ Pronto per Manuale
+      </div>
+    </div>
+    <p class="muted">In modalità manuale, i comandi inviati qui sotto vengono inoltrati direttamente al robot. Tieni premuto i pulsanti freccia o usa W/A/S/D per guidare; Spazio per STOP.</p>
+  </div>
+
+  <div class="panel">
+    <h3>Movimento</h3>
+    <div class="controls-grid">
+      <div class="grid-arrows">
+        <button id="mv-forward" title="Avanti">⬆️</button>
+        <div class="row spread">
+          <button id="mv-left" title="Gira a sinistra">⬅️</button>
+          <button id="mv-stop" class="danger" title="Stop">⏹</button>
+          <button id="mv-right" title="Gira a destra">➡️</button>
+        </div>
+        <button id="mv-backward" title="Indietro">⬇️</button>
+      </div>
+      <div class="grid-sliders">
+        <label>Lineare (m/s)
+          <input id="lin" type="range" min="-0.8" max="0.8" step="0.05" value="0">
+        </label>
+        <label>Angolare (rad/s)
+          <input id="ang" type="range" min="-1.5" max="1.5" step="0.05" value="0">
+        </label>
+        <div class="row gap">
+          <button id="btn-send-vel" class="primary">Invia Velocità</button>
+          <span id="vel-preview" class="muted"></span>
+        </div>
+        <div class="row gap">
+          <span class="muted">Preset:</span>
+          <button id="preset-slow">Lento</button>
+          <button id="preset-medium">Medio</button>
+          <button id="preset-fast">Veloce</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Lama</h3>
+    <div class="row gap">
+      <button id="blade-on" class="primary">Lama ON</button>
+      <button id="blade-off" class="secondary">Lama OFF</button>
+      <span class="muted">(toggle rapido)</span>
+    </div>
+  </div>
+
+  <p id="manual-status" class="muted"></p>
+</section>

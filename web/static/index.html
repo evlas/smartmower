@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SmartMower - Utente</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>SmartMower</h1>
+    <nav>
+      <a href="/admin" class="admin-link">Area Amministratore</a>
+    </nav>
+  </header>
+  <main>
+    <nav class="tabs">
+      <button class="tab" data-tab="status" aria-selected="true">Stato & Mappa</button>
+      <button class="tab" data-tab="manual" aria-selected="false">Manuale</button>
+    </nav>
+    <div id="tab-content" class="tab-content" aria-live="polite"></div>
+  </main>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

@@ -10,6 +10,9 @@ struct GPSData {
     double latitude = 0.0;
     double longitude = 0.0;
     double altitude = 0.0;
+    double hdop = 0.0;      // Horizontal Dilution of Precision (da GGA)
+    double pdop = 0.0;      // Position Dilution of Precision (da GSA)
+    double vdop = 0.0;      // Vertical Dilution of Precision (da GSA)
     double speed = 0.0;
     double course = 0.0;
     int satellites = 0;
@@ -30,6 +33,7 @@ private:
     // Parser per specifiche frasi NMEA
     bool parseGGA(const std::vector<std::string>& tokens, GPSData& data);
     bool parseRMC(const std::vector<std::string>& tokens, GPSData& data);
+    bool parseGSA(const std::vector<std::string>& tokens, GPSData& data);
     
     // Converte coordinate NMEA (DDMM.MMMM) in gradi decimali
     double nmeaToDecimal(double nmea_coord, char direction);

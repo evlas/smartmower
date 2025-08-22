@@ -42,8 +42,15 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         
-        // Inizializza i topic MQTT
-        MqttTopics::initialize(config->getString("mqtt.topics.gps.base", "smartmower/gps"));
+        // Inizializza i topic MQTT unificando root + base (coerenza con Pico/SLAM)
+        {
+            std::string root = config->getString("mqtt.root_topic", "smartmower");
+            std::string gps_base = config->getString("mqtt.topics.gps.base", "gps");
+            if (!root.empty() && root.back() == '/') root.pop_back();
+            while (!gps_base.empty() && gps_base.front() == '/') gps_base.erase(gps_base.begin());
+            std::string full_base = root + "/" + gps_base; // es. smartmower/gps
+            MqttTopics::initialize(full_base);
+        }
         
         // Crea il client MQTT
         mqtt::MqttClient mqtt(
@@ -69,11 +76,20 @@ int main(int argc, char* argv[]) {
             }
         }
         
-        // Crea l'interfaccia GPS
+        // Crea l'interfaccia GPS con i parametri di configurazione
         auto gps = createGPSInterface(
-            config->getString("gps.device", "/dev/ttyAMA2"),
-            config->getInt("gps.baud_rate", 115200)
+            config->getString("gps_config.uart_device", "/dev/ttyAMA2"),
+            config->getInt("gps_config.baudrate", 115200),
+            config->getInt("gps_config.uart_timeout_ms", 1000),
+            config->getInt("gps_config.max_satellites", 24)
         );
+        
+        // Configura il logging se specificato nella configurazione
+        if (config->getBool("gps_logging.enabled", false)) {
+            std::string log_file = config->getString("gps_logging.file", "/opt/smartmower/log/gps_bridge.log");
+            // Qui andrebbe implementata la configurazione del logger
+            std::cout << "Logging abilitato su: " << log_file << std::endl;
+        }
         
         if (!gps || !gps->initialize()) {
             std::cerr << "Errore nell'inizializzazione del GPS" << std::endl;
@@ -117,6 +133,9 @@ int main(int argc, char* argv[]) {
                             j["latitude"] = gps_data.latitude;
                             j["longitude"] = gps_data.longitude;
                             j["altitude"] = gps_data.altitude;
+                            j["hdop"] = gps_data.hdop;
+                            j["pdop"] = gps_data.pdop;
+                            j["vdop"] = gps_data.vdop;
                             j["speed"] = gps_data.speed;
                             j["course"] = gps_data.course;
                             j["satellites"] = gps_data.satellites;
@@ -161,10 +180,13 @@ int main(int argc, char* argv[]) {
                 status["gps_connected"] = gps->isConnected();
                 status["fix_quality"] = gps_data.fix_quality;
                 status["satellites"] = gps_data.satellites;
+                status["hdop"] = gps_data.hdop;
+                status["pdop"] = gps_data.pdop;
+                status["vdop"] = gps_data.vdop;
                 
                 mqtt.publish(
                     MqttTopics::getTopic(MqttTopics::TOPIC_STATUS),
-                    "{\"status\":\"active\"}",
+                    status.dump(),
                     config->getInt("mqtt.qos", 1),
                     false
                 );

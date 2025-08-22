@@ -4,6 +4,7 @@ LDFLAGS = $(shell pkg-config --libs libmosquitto) -lcjson
 
 # Directory di output per gli oggetti
 OBJ_DIR = obj
+BIN_DIR = bin
 
 # File sorgente
 SRCS = src/main.cpp \
@@ -21,13 +22,14 @@ MQTT_OBJ = $(OBJ_DIR)/mqtt/mqtt_client.o \
 OBJS = $(patsubst src/%.cpp,$(OBJ_DIR)/%.o,$(SRCS))
 
 # Nome dell'eseguibile
-TARGET = gps_bridge
+TARGET = $(BIN_DIR)/gps_bridge
 
 # Regola predefinita
 all: $(TARGET)
 
 # Link dell'eseguibile
 $(TARGET): $(OBJS)
+	@mkdir -p $(BIN_DIR)
 	$(CXX) -o $@ $^ $(LDFLAGS)
 
 # Regola generica per compilare i file oggetto
@@ -37,13 +39,11 @@ $(OBJ_DIR)/%.o: src/%.cpp
 
 # Pulizia
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
 # Installazione
 install: $(TARGET)
 	install -d $(DESTDIR)/opt/smartmower/bin
 	install -m 755 $(TARGET) $(DESTDIR)/opt/smartmower/bin/
-	install -d $(DESTDIR)/etc/systemd/system
-	install -m 644 systemd/gps_bridge.service $(DESTDIR)/etc/systemd/system/
 
 .PHONY: all clean install

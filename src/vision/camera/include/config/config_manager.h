@@ -4,6 +4,7 @@
 #include <string>
 #include <cjson/cJSON.h>
 #include <unordered_map>
+#include <nlohmann/json.hpp>
 
 namespace config {
 
@@ -19,6 +20,9 @@ public:
     
     // Aggiunto per supportare oggetti annidati
     std::unordered_map<std::string, std::string> getObject(const std::string& key);
+    
+    // Get a JSON object directly
+    nlohmann::json getJsonObject(const std::string& key);
 
 private:
     std::string path_;

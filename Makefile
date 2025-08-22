@@ -10,17 +10,21 @@ ETCDIR ?= $(PREFIX)/etc
 
 # List of all component directories with Makefiles
 COMPONENTS := \
-	src/fusion \
-	src/gps \
-	src/pico \
-	src/vision/camera \
-	src/vision/grass \
-	src/vision/obstacle \
-	src/vision/perimeter \
-	src/state_machine \
-	src/slam \
-	src/path_planning \
-	src/lcd_interface
+    src/bridge/gps \
+    src/bridge/pico \
+    src/vision/camera \
+    src/vision/grass \
+    src/vision/obstacle \
+    src/vision/perimeter \
+    src/vision/odometry \
+    src/state_machine \
+    src/safety \
+    src/slam \
+    src/path_planning \
+    src/lcd_interface \
+	src/supervisor \
+	src/navigation/map \
+    web
 
 # Default target
 all: build
@@ -90,3 +94,4 @@ uninstall:
 	@echo "Uninstallation complete"
 
 .PHONY: all build install clean uninstall
+

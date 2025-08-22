@@ -12,7 +12,11 @@ import gc
 from config import (
     PINS, I2C_ADDR, COMM, MOTORS, SENSORS, SAFETY, PERF, PCF, CAL, DEBUG, SYS
 )
-from binary_protocol import BinaryProtocol, MSG_MOTOR_CMD, MSG_SYSTEM_CMD, SYS_CMD_EMERGENCY_STOP, SYS_CMD_RESET, SYS_CMD_CALIBRATE
+from binary_protocol import (
+    BinaryProtocol, PICO_SOF, MSG_MOTOR_CMD, MSG_SYSTEM_CMD,
+    SYS_CMD_EMERGENCY_STOP, SYS_CMD_RESET, SYS_CMD_SET_RELAY,
+    SYS_CMD_CALIBRATE, SYS_CMD_RESET_ENCODERS
+)
 
 
 class MotorController:
@@ -226,6 +230,10 @@ class I2CSensorManager:
         self.mag_data = [0.0] * 3  # mx, my, mz
         self.power_data = [0.0, 0.0]  # voltage, current
         self.safety_flags = 0
+        # Calibration biases (ax, ay, az), (gx, gy, gz), (mx, my, mz)
+        self.accel_bias = [0.0, 0.0, 0.0]
+        self.gyro_bias = [0.0, 0.0, 0.0]
+        self.mag_bias = [0.0, 0.0, 0.0]
         
         self._init_sensors()
     
@@ -268,6 +276,14 @@ class I2CSensorManager:
             gy = self._bytes_to_int16(gyro_data[2:4]) / 131.0 * 0.017453
             gz = self._bytes_to_int16(gyro_data[4:6]) / 131.0 * 0.017453
             
+            # Apply calibration biases
+            ax -= self.accel_bias[0]
+            ay -= self.accel_bias[1]
+            az -= self.accel_bias[2]
+            gx -= self.gyro_bias[0]
+            gy -= self.gyro_bias[1]
+            gz -= self.gyro_bias[2]
+            
             self.imu_data = [ax, ay, az, gx, gy, gz]
             
         except:
@@ -282,7 +298,12 @@ class I2CSensorManager:
             mz = self._bytes_to_int16(mag_data[2:4])  # Note: Y and Z swapped
             my = self._bytes_to_int16(mag_data[4:6])
             
-            self.mag_data = [mx * 0.92e-6, my * 0.92e-6, mz * 0.92e-6]
+            # Convert to Tesla then apply bias
+            mx = mx * 0.92e-6 - self.mag_bias[0]
+            my = my * 0.92e-6 - self.mag_bias[1]
+            mz = mz * 0.92e-6 - self.mag_bias[2]
+            
+            self.mag_data = [mx, my, mz]
             
         except:
             pass
@@ -340,6 +361,49 @@ class I2CSensorManager:
         """Convert 2 bytes to unsigned 16-bit integer"""
         return (data[0] << 8) | data[1]
 
+    def calibrate_imu_mag(self, samples=300, delay_ms=10):
+        """Calibrate IMU (accel/gyro) and magnetometer biases with device at rest and level.
+        - Accel bias targets [0,0,9.81]
+        - Gyro bias targets [0,0,0]
+        - Mag bias targets [0,0,0] (hard-iron)
+        """
+        try:
+            sum_ax = sum_ay = sum_az = 0.0
+            sum_gx = sum_gy = sum_gz = 0.0
+            sum_mx = sum_my = sum_mz = 0.0
+            for _ in range(samples):
+                # Read raw IMU
+                accel_data = self.i2c.readfrom_mem(I2C_ADDR.MPU6050, 0x3B, 6)
+                gyro_data = self.i2c.readfrom_mem(I2C_ADDR.MPU6050, 0x43, 6)
+                ax = self._bytes_to_int16(accel_data[0:2]) / 16384.0 * 9.81
+                ay = self._bytes_to_int16(accel_data[2:4]) / 16384.0 * 9.81
+                az = self._bytes_to_int16(accel_data[4:6]) / 16384.0 * 9.81
+                gx = self._bytes_to_int16(gyro_data[0:2]) / 131.0 * 0.017453
+                gy = self._bytes_to_int16(gyro_data[2:4]) / 131.0 * 0.017453
+                gz = self._bytes_to_int16(gyro_data[4:6]) / 131.0 * 0.017453
+                # Read raw MAG
+                mag_data = self.i2c.readfrom_mem(I2C_ADDR.HMC5883L, 0x03, 6)
+                mx = self._bytes_to_int16(mag_data[0:2]) * 0.92e-6
+                mz = self._bytes_to_int16(mag_data[2:4]) * 0.92e-6
+                my = self._bytes_to_int16(mag_data[4:6]) * 0.92e-6
+                # Accumulate
+                sum_ax += ax; sum_ay += ay; sum_az += az
+                sum_gx += gx; sum_gy += gy; sum_gz += gz
+                sum_mx += mx; sum_my += my; sum_mz += mz
+                time.sleep_ms(delay_ms)
+            inv = 1.0 / float(samples)
+            avg_ax = sum_ax * inv; avg_ay = sum_ay * inv; avg_az = sum_az * inv
+            avg_gx = sum_gx * inv; avg_gy = sum_gy * inv; avg_gz = sum_gz * inv
+            avg_mx = sum_mx * inv; avg_my = sum_my * inv; avg_mz = sum_mz * inv
+            # Biases
+            self.accel_bias = [avg_ax - 0.0, avg_ay - 0.0, avg_az - 9.81]
+            self.gyro_bias = [avg_gx, avg_gy, avg_gz]
+            self.mag_bias = [avg_mx, avg_my, avg_mz]
+            return True
+        except Exception as e:
+            print(f"Calibration error: {e}")
+            return False
+
 
 class SmartMowerPico:
     """Main controller class for Smart Mower Pico"""
@@ -369,11 +433,14 @@ class SmartMowerPico:
         
         # Binary protocol for optimized communication
         self.binary_protocol = BinaryProtocol(self.uart)
+        # UART receive buffer for framed protocol
+        self._rx_buf = bytearray()
         
         # Control variables
         self.running = True
         self.emergency_stop = False
         self.last_command_time = time.ticks_ms()
+        self.calibrated = False
         
         # Performance monitoring
         self.loop_count = 0
@@ -420,20 +487,99 @@ class SmartMowerPico:
                 
             elif cmd_type == 'system':
                 cmd_id, value = args
-                
+
                 if cmd_id == SYS_CMD_EMERGENCY_STOP:
                     self.emergency_stop_all()
                     print("Emergency stop activated")
                 elif cmd_id == SYS_CMD_RESET:
                     self.emergency_stop = False
                     print("Emergency stop reset")
+                elif cmd_id == SYS_CMD_SET_RELAY:
+                    # value >= 0.5 -> ON, else OFF
+                    try:
+                        self.relay.value(1 if float(value) >= 0.5 else 0)
+                        print(f"Relay set to: {'ON' if float(value) >= 0.5 else 'OFF'}")
+                    except Exception as e:
+                        print(f"Relay set error: {e}")
                 elif cmd_id == SYS_CMD_CALIBRATE:
+                    print("Calibration requested (IMU/MAG) - starting...")
+                    ok = self.i2c_sensors.calibrate_imu_mag()
+                    self.calibrated = bool(ok)
+                    if ok:
+                        print("Calibration completed successfully")
+                    else:
+                        print("Calibration failed")
+                    # Publish an immediate status update for confirmation
+                    self.send_status_report()
+                elif cmd_id == SYS_CMD_RESET_ENCODERS:
                     for motor in self.motors:
                         motor.reset_encoder()
-                    print("Encoders calibrated")
+                    print("Encoders reset")
         
         except Exception as e:
             print(f"Binary command processing error: {e}")
+
+    def _checksum(self, payload: bytes) -> int:
+        c = 0
+        for b in payload:
+            c ^= b
+        return c & 0xFF
+
+    def _uart_process_frames(self):
+        """Legge dallo stream UART e processa frame [SOF][LENlo][LENhi][PAYLOAD+CHK]"""
+        # Accumula nuovi byte
+        try:
+            available = self.uart.any()
+            if available:
+                chunk = self.uart.read(available)
+                if chunk:
+                    self._rx_buf.extend(chunk)
+        except Exception as e:
+            print(f"UART read error: {e}")
+            return
+
+        # Parsing dei frame
+        while len(self._rx_buf) >= 3:
+            # Cerca SOF
+            try:
+                sof_index = self._rx_buf.index(PICO_SOF)
+            except ValueError:
+                # SOF non presente, scarta tutto
+                self._rx_buf.clear()
+                break
+
+            # Scarta eventuali byte prima del SOF
+            if sof_index > 0:
+                del self._rx_buf[:sof_index]
+                if len(self._rx_buf) < 3:
+                    break
+
+            # Ora _rx_buf[0] = SOF
+            if len(self._rx_buf) < 3:
+                break
+            length = self._rx_buf[1] | (self._rx_buf[2] << 8)
+            total_needed = 1 + 2 + length
+            if len(self._rx_buf) < total_needed:
+                # attende altri byte
+                break
+
+            # Estrai payload+chk
+            payload_plus_chk = bytes(self._rx_buf[3:3+length])
+            if length < 2:
+                # lunghezza non valida
+                del self._rx_buf[0]
+                continue
+            payload = payload_plus_chk[:-1]
+            chk = payload_plus_chk[-1]
+            if self._checksum(payload) != chk:
+                # frame corrotto, scarta SOF
+                del self._rx_buf[0]
+                continue
+
+            # Passa il payload (che include type + campi) al parser comando
+            self.process_command(payload_plus_chk)
+            # Rimuovi intero frame
+            del self._rx_buf[:total_needed]
     
     def read_sensors(self):
         """Read all sensors efficiently"""
@@ -499,7 +645,9 @@ class SmartMowerPico:
             # System flags (can be expanded)
             system_flags = 0
             if self.emergency_stop:
-                system_flags |= 0x01
+                system_flags |= 0x01  # bit0: emergency
+            if self.calibrated:
+                system_flags |= 0x02  # bit1: calibrated
             
             # Send binary status report (55 bytes)
             success = self.binary_protocol.send_status_report(
@@ -560,28 +708,8 @@ class SmartMowerPico:
                 motor.update_speed()
                 motor.update_rpm()  # Calculate real RPM from encoder
             
-            # Process incoming binary commands
-            if self.uart.any():
-                try:
-                    # Read binary command data
-                    # Try to read motor command first (17 bytes)
-                    motor_cmd_size = self.binary_protocol.get_motor_cmd_size()
-                    system_cmd_size = self.binary_protocol.get_system_cmd_size()
-                    
-                    # Read available data
-                    available = self.uart.any()
-                    if available >= motor_cmd_size:
-                        # Try motor command first
-                        data = self.uart.read(motor_cmd_size)
-                        if data and len(data) == motor_cmd_size:
-                            self.process_command(data)
-                    elif available >= system_cmd_size:
-                        # Try system command
-                        data = self.uart.read(system_cmd_size)
-                        if data and len(data) == system_cmd_size:
-                            self.process_command(data)
-                except Exception as e:
-                    print(f"UART read error: {e}")
+            # Process incoming framed binary commands
+            self._uart_process_frames()
             
             # Send sensor data at configured frequency
             if time.ticks_diff(loop_start, loop_timer) >= COMM.COMMUNICATION_PERIOD_MS:

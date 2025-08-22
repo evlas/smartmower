@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <libcamera/libcamera.h>
 #include <libcamera/framebuffer_allocator.h>
 #include <mutex>
@@ -38,6 +39,7 @@ private:
     std::vector<uint8_t> lastFrame_;
     std::mutex frameMutex_;
     std::condition_variable frameCV_;
+    bool shutdown_;
 };
 
 } // namespace camera

@@ -15,7 +15,12 @@ MSG_SYSTEM_CMD = 0x11
 # System command IDs
 SYS_CMD_EMERGENCY_STOP = 0x01
 SYS_CMD_RESET = 0x02
-SYS_CMD_CALIBRATE = 0x03
+SYS_CMD_SET_RELAY = 0x03
+SYS_CMD_CALIBRATE = 0x04
+SYS_CMD_RESET_ENCODERS = 0x05
+
+# Framing constants
+PICO_SOF = 0xAA
 
 # Binary format definitions (Little Endian)
 # Sensor data: type(1) + timestamp(4) + imu(24) + mag(12) + ultrasonic(12) + power(8) + flags(4) = 65 bytes
@@ -35,11 +40,24 @@ class BinaryProtocol:
     
     def __init__(self, uart):
         self.uart = uart
+    
+    def _checksum(self, payload: bytes) -> int:
+        """XOR di tutti i byte del payload"""
+        c = 0
+        for b in payload:
+            c ^= b
+        return c & 0xFF
+    
+    def _frame(self, payload: bytes) -> bytes:
+        """Costruisce il frame: SOF(0xAA) + LEN(2, little) = len(payload)+1 + payload + CHK"""
+        chk = self._checksum(payload)
+        length = len(payload) + 1  # include checksum
+        return bytes([PICO_SOF, length & 0xFF, (length >> 8) & 0xFF]) + payload + bytes([chk])
         
     def send_sensor_data(self, imu_data, mag_data, ultrasonic_data, power_data, flags):
         """Send sensor data in binary format"""
         try:
-            packet = struct.pack(SENSOR_FORMAT,
+            payload = struct.pack(SENSOR_FORMAT,
                 MSG_SENSOR_DATA,           # message type
                 int(time.ticks_ms()),      # timestamp
                 *imu_data,                 # 6 float IMU [ax,ay,az,gx,gy,gz]
@@ -48,7 +66,8 @@ class BinaryProtocol:
                 *power_data,               # 2 float power [voltage,current]
                 *flags                     # 4 byte flags [emergency,rain,bumper,lift]
             )
-            self.uart.write(packet)
+            frame = self._frame(payload)
+            self.uart.write(frame)
             return True
         except Exception as e:
             print(f"Send sensor data error: {e}")
@@ -57,7 +76,7 @@ class BinaryProtocol:
     def send_status_report(self, motor_speeds, motor_rpm, encoder_counts, system_flags, relay_state):
         """Send status report in binary format"""
         try:
-            packet = struct.pack(STATUS_FORMAT,
+            payload = struct.pack(STATUS_FORMAT,
                 MSG_STATUS_REPORT,         # message type
                 int(time.ticks_ms()),      # timestamp
                 *motor_speeds,             # 4 float motor speeds [left,right,blade1,blade2]
@@ -66,7 +85,8 @@ class BinaryProtocol:
                 system_flags,              # system flags byte
                 relay_state                # relay state byte
             )
-            self.uart.write(packet)
+            frame = self._frame(payload)
+            self.uart.write(frame)
             return True
         except Exception as e:
             print(f"Send status report error: {e}")

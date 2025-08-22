@@ -8,70 +8,243 @@
     "topics": {
       "camera": {
         "base": "vision/camera",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
-        "qos": 1,
-        "retain": false
-      },
-      "obstacle": {
-        "base": "vision/obstacle",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
-        "publish_threshold": 0.08,
-        "qos": 1,
-        "retain": false
-      },
-      "perimeter": {
-        "base": "vision/perimeter",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
-        "qos": 1,
-        "retain": false
-      },
-      "grass": {
-        "base": "vision/grass",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
+        "subtopics": { "data": "data", "status": "status", "commands": "commands" },
         "qos": 1,
         "retain": false
       },
       "pico": {
         "base": "bridge/pico",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
-        "qos": 1,
-        "retain": false,
-        "keepalive": 60,
-        "client_id": "pico_bridge"
-      },
-      "gps": {
-        "base": "bridge/gps",
-        "subtopics": {
-          "data": "data",
-          "status": "status",
-          "commands": "commands"
-        },
+        "subtopics": { "data": "data", "status": "status", "commands": "commands" },
         "qos": 1,
         "retain": false,
         "keepalive": 60
+      },
+      "gps": {
+        "base": "bridge/gps",
+        "subtopics": { "data": "data", "status": "status", "commands": "commands" },
+        "qos": 1,
+        "retain": false,
+        "keepalive": 60
+      },
+      "safety": {
+        "base": "safety",
+        "subtopics": { "state": "state", "estop": "estop", "commands": "commands" },
+        "qos": 1,
+        "retain": false
+      },
+      "state_machine": {
+        "base": "state_machine",
+        "subtopics": { "state": "state", "event": "event", "transition": "transition", "commands": "commands" },
+        "qos": 1,
+        "retain": false,
+        "states": {
+          "STATE_INIT": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop",
+              "smartmower/bridge/pico/status",
+              "smartmower/bridge/gps/status",
+              "smartmower/vision/camera/status"
+            ],
+            "allowed_events": [
+              "EVENT_INIT_COMPLETE",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_TIMEOUT",
+              "EVENT_ERROR_OCCURRED"
+            ],
+            "transitions": [
+              { "on": "EVENT_INIT_COMPLETE", "to": "STATE_IDLE" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_TIMEOUT", "to": "STATE_ERROR" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" }
+            ]
+          },
+          "STATE_IDLE": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop",
+              "smartmower/bridge/pico/status",
+              "smartmower/bridge/gps/status"
+            ],
+            "allowed_events": [
+              "EVENT_START_MOWING",
+              "EVENT_MANUAL_CONTROL",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_ERROR_OCCURRED",
+              "EVENT_BATTERY_LOW"
+            ],
+            "transitions": [
+              { "on": "EVENT_START_MOWING", "to": "STATE_UNDOCKING" },
+              { "on": "EVENT_MANUAL_CONTROL", "to": "STATE_MANUAL_CONTROL" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" },
+              { "on": "EVENT_BATTERY_LOW", "to": "STATE_DOCKING" }
+            ]
+          },
+          "STATE_MANUAL_CONTROL": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop",
+              "smartmower/state_machine/commands"
+            ],
+            "allowed_events": [
+              "EVENT_END_MANUAL_CONTROL",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_ERROR_OCCURRED"
+            ],
+            "transitions": [
+              { "on": "EVENT_END_MANUAL_CONTROL", "to": "STATE_IDLE" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" }
+            ]
+          },
+          "STATE_MOWING": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_PAUSE",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_BATTERY_LOW",
+              "EVENT_OBSTACLE_DETECTED",
+              "EVENT_PERIMETER_CROSSED",
+              "EVENT_AREA_COMPLETE",
+              "EVENT_ERROR_OCCURRED"
+            ],
+            "transitions": [
+              { "on": "EVENT_PAUSE", "to": "STATE_PAUSED" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_BATTERY_LOW", "to": "STATE_DOCKING" },
+              { "on": "EVENT_OBSTACLE_DETECTED", "to": "STATE_PAUSED" },
+              { "on": "EVENT_PERIMETER_CROSSED", "to": "STATE_PAUSED" },
+              { "on": "EVENT_AREA_COMPLETE", "to": "STATE_DOCKING" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" }
+            ]
+          },
+          "STATE_CHARGING": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_BATTERY_FULL",
+              "EVENT_START_MOWING",
+              "EVENT_MANUAL_CONTROL",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_ERROR_OCCURRED"
+            ],
+            "transitions": [
+              { "on": "EVENT_BATTERY_FULL", "to": "STATE_IDLE" },
+              { "on": "EVENT_START_MOWING", "to": "STATE_UNDOCKING" },
+              { "on": "EVENT_MANUAL_CONTROL", "to": "STATE_MANUAL_CONTROL" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" }
+            ]
+          },
+          "STATE_EMERGENCY_STOP": {
+            "consumes": [
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_EMERGENCY_RECOVER"
+            ],
+            "transitions": [
+              { "on": "EVENT_EMERGENCY_RECOVER", "to": "STATE_IDLE" }
+            ]
+          },
+          "STATE_UNDOCKING": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_UNDOCKING_COMPLETE",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_PAUSE",
+              "EVENT_ERROR_OCCURRED",
+              "EVENT_TIMEOUT",
+              "EVENT_OBSTACLE_DETECTED",
+              "EVENT_PERIMETER_CROSSED"
+            ],
+            "transitions": [
+              { "on": "EVENT_UNDOCKING_COMPLETE", "to": "STATE_MOWING" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_PAUSE", "to": "STATE_PAUSED" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" },
+              { "on": "EVENT_TIMEOUT", "to": "STATE_ERROR" },
+              { "on": "EVENT_OBSTACLE_DETECTED", "to": "STATE_PAUSED" },
+              { "on": "EVENT_PERIMETER_CROSSED", "to": "STATE_PAUSED" }
+            ]
+          },
+          "STATE_DOCKING": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_DOCKING_COMPLETE",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_ERROR_OCCURRED",
+              "EVENT_TIMEOUT",
+              "EVENT_OBSTACLE_DETECTED"
+            ],
+            "transitions": [
+              { "on": "EVENT_DOCKING_COMPLETE", "to": "STATE_CHARGING" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" },
+              { "on": "EVENT_TIMEOUT", "to": "STATE_ERROR" },
+              { "on": "EVENT_OBSTACLE_DETECTED", "to": "STATE_PAUSED" }
+            ]
+          },
+          "STATE_ERROR": {
+            "consumes": [
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_ERROR_RECOVER",
+              "EVENT_EMERGENCY_STOP"
+            ],
+            "transitions": [
+              { "on": "EVENT_ERROR_RECOVER", "to": "STATE_IDLE" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" }
+            ]
+          },
+          "STATE_PAUSED": {
+            "consumes": [
+              "smartmower/safety/state",
+              "smartmower/safety/estop"
+            ],
+            "allowed_events": [
+              "EVENT_RESUME",
+              "EVENT_EMERGENCY_STOP",
+              "EVENT_ERROR_OCCURRED",
+              "EVENT_BATTERY_LOW"
+            ],
+            "transitions": [
+              { "on": "EVENT_RESUME", "to": "STATE_MOWING" },
+              { "on": "EVENT_EMERGENCY_STOP", "to": "STATE_EMERGENCY_STOP" },
+              { "on": "EVENT_ERROR_OCCURRED", "to": "STATE_ERROR" },
+              { "on": "EVENT_BATTERY_LOW", "to": "STATE_DOCKING" }
+            ]
+          }
+        }
+      },
+      "slam": {
+        "base": "slam",
+        "subtopics": { "pose": "pose", "status": "status" },
+        "qos": 1,
+        "retain": false
+      },
+      "navigation": {
+        "base": "nav",
+        "subtopics": { "map": "map", "costmap_status": "costmap/status" },
+        "qos": 1,
+        "retain": false
       }
     }
   },
+
   "camera": {
     "type": "rpi",
     "width": 1280,
@@ -79,597 +252,7 @@
     "fps": 15,
     "quality": 85
   },
-  "metadata": {
-    "config_version": "1.1",
-    "robot_id": "smartmower_001",
-    "last_modified": "2025-08-08T20:00:00+02:00"
-  },
-  "battery_profiles": {
-    "lipo_3s": {
-      "type": "lithium_polymer",
-      "cells": 3,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 2.2,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 100,
-        "stable_time_seconds": 300,
-        "current_threshold_ma": 50
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "lipo_4s": {
-      "type": "lithium_polymer",
-      "cells": 4,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 3.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 120,
-        "stable_time_seconds": 300,
-        "current_threshold_ma": 60
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "lipo_6s": {
-      "type": "lithium_polymer",
-      "cells": 6,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 5.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 150,
-        "stable_time_seconds": 300,
-        "current_threshold_ma": 75
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "lifepo4_4s": {
-      "type": "lithium_iron_phosphate",
-      "cells": 4,
-      "nominal_voltage_per_cell": 3.2,
-      "max_voltage_per_cell": 3.6,
-      "min_voltage_per_cell": 2.5,
-      "capacity_ah": 4.0,
-      "charging": {
-        "full_voltage_per_cell": 3.55,
-        "trickle_current_ma": 80,
-        "stable_time_seconds": 600,
-        "current_threshold_ma": 40
-      },
-      "voltage_curve": {
-        "100": 3.6, "90": 3.4, "80": 3.35, "70": 3.32, "60": 3.3,
-        "50": 3.28, "40": 3.26, "30": 3.24, "20": 3.2, "10": 3.0, "5": 2.8, "0": 2.5
-      }
-    },
-    "liion_6s": {
-      "type": "lithium_ion",
-      "cells": 6,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 5.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 100,
-        "stable_time_seconds": 300,
-        "current_threshold_ma": 50
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "liion_8s": {
-      "type": "lithium_ion",
-      "cells": 8,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 6.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 120,
-        "stable_time_seconds": 400,
-        "current_threshold_ma": 60
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "battery_12v_lifepo4": {
-      "type": "lithium_iron_phosphate",
-      "cells": 4,
-      "nominal_voltage_per_cell": 3.2,
-      "max_voltage_per_cell": 3.6,
-      "min_voltage_per_cell": 2.5,
-      "capacity_ah": 8.0,
-      "nominal_pack_voltage": 12.8,
-      "max_pack_voltage": 14.4,
-      "min_pack_voltage": 10.0,
-      "charging": {
-        "full_voltage_per_cell": 3.55,
-        "trickle_current_ma": 200,
-        "stable_time_seconds": 600,
-        "current_threshold_ma": 100
-      },
-      "voltage_curve": {
-        "100": 3.6, "90": 3.4, "80": 3.35, "70": 3.32, "60": 3.3,
-        "50": 3.28, "40": 3.26, "30": 3.24, "20": 3.2, "10": 3.0, "5": 2.8, "0": 2.5
-      }
-    },
-    "battery_24v_lifepo4": {
-      "type": "lithium_iron_phosphate",
-      "cells": 8,
-      "nominal_voltage_per_cell": 3.2,
-      "max_voltage_per_cell": 3.6,
-      "min_voltage_per_cell": 2.5,
-      "capacity_ah": 12.0,
-      "nominal_pack_voltage": 25.6,
-      "max_pack_voltage": 28.8,
-      "min_pack_voltage": 20.0,
-      "charging": {
-        "full_voltage_per_cell": 3.55,
-        "trickle_current_ma": 300,
-        "stable_time_seconds": 800,
-        "current_threshold_ma": 150
-      },
-      "voltage_curve": {
-        "100": 3.6, "90": 3.4, "80": 3.35, "70": 3.32, "60": 3.3,
-        "50": 3.28, "40": 3.26, "30": 3.24, "20": 3.2, "10": 3.0, "5": 2.8, "0": 2.5
-      }
-    },
-    "battery_24v_lipo": {
-      "type": "lithium_polymer",
-      "cells": 6,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 8.0,
-      "nominal_pack_voltage": 22.2,
-      "max_pack_voltage": 25.2,
-      "min_pack_voltage": 18.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 200,
-        "stable_time_seconds": 300,
-        "current_threshold_ma": 100
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    },
-    "battery_36v_lifepo4": {
-      "type": "lithium_iron_phosphate",
-      "cells": 12,
-      "nominal_voltage_per_cell": 3.2,
-      "max_voltage_per_cell": 3.6,
-      "min_voltage_per_cell": 2.5,
-      "capacity_ah": 15.0,
-      "nominal_pack_voltage": 38.4,
-      "max_pack_voltage": 43.2,
-      "min_pack_voltage": 30.0,
-      "charging": {
-        "full_voltage_per_cell": 3.55,
-        "trickle_current_ma": 400,
-        "stable_time_seconds": 1000,
-        "current_threshold_ma": 200
-      },
-      "voltage_curve": {
-        "100": 3.6, "90": 3.4, "80": 3.35, "70": 3.32, "60": 3.3,
-        "50": 3.28, "40": 3.26, "30": 3.24, "20": 3.2, "10": 3.0, "5": 2.8, "0": 2.5
-      }
-    },
-    "battery_36v_lipo": {
-      "type": "lithium_polymer",
-      "cells": 10,
-      "nominal_voltage_per_cell": 3.7,
-      "max_voltage_per_cell": 4.2,
-      "min_voltage_per_cell": 3.0,
-      "capacity_ah": 10.0,
-      "nominal_pack_voltage": 37.0,
-      "max_pack_voltage": 42.0,
-      "min_pack_voltage": 30.0,
-      "charging": {
-        "full_voltage_per_cell": 4.15,
-        "trickle_current_ma": 300,
-        "stable_time_seconds": 400,
-        "current_threshold_ma": 150
-      },
-      "voltage_curve": {
-        "100": 4.2, "90": 4.1, "80": 4.0, "70": 3.9, "60": 3.8,
-        "50": 3.75, "40": 3.7, "30": 3.65, "20": 3.6, "10": 3.4, "5": 3.2, "0": 3.0
-      }
-    }
-  },
-  "tuning": {
-    "speeds": {
-      "max_linear_speed": 1.5,
-      "max_angular_speed": 1.0,
-      "min_speed_threshold": 0.1,
-      "acceleration_limit": 0.5,
-      "deceleration_limit": 1.0,
-      "cutting_speed": 0.8
-    },
-    "navigation": {
-      "waypoint_tolerance": 0.5,
-      "obstacle_detection_distance": 1.0,
-      "boundary_safety_margin": 0.3,
-      "turn_radius_min": 0.5,
-      "path_lookahead_distance": 2.0
-    },
-    "cutting": {
-      "pattern": "zigzag",
-      "available_patterns": ["zigzag", "linear", "random", "adaptive", "spiral"],
-      "cutting_width_m": 0.30,
-      "effective_width_m": 0.27,
-      "stripe_width": 0.8,
-      "overlap_percentage": 10,
-      "cutting_height_mm": 40,
-      "blade_speed_rpm": 3000
-    },
-    "battery_thresholds": {
-      "low_threshold": 30,
-      "critical_threshold": 15,
-      "charging_return_threshold": 25,
-      "max_work_time": 120,
-      "charging_timeout": 180
-    },
-    "state_timeouts": {
-      "init_timeout": 30,
-      "undocking_timeout": 120,
-      "docking_timeout": 300,
-      "manual_control_timeout": 600,
-      "charging_timeout": 14400,
-      "error_timeout": 300,
-      "component_heartbeat_timeout": 10,
-      "gps_timeout": 5000,
-      "vision_timeout": 100
-    },
-    "battery_parameters": {
-      "discharge_current_threshold": 0.1,
-      "voltage_precision": 0.001,
-      "percentage_min": 0.0,
-      "percentage_max": 100.0,
-      "curve_points_max": 12
-    },
-    "vision_parameters": {
-      "grass_coverage_threshold": 10.0,
-      "loop_frequency_hz": 100,
-      "loop_delay_ms": 10,
-      "detection_timeout_ms": 100
-    },
-    "slam_parameters": {
-      "map_width": 200,
-      "map_height": 200,
-      "cell_size_m": 0.1,
-      "max_landmarks": 100,
-      "max_sonar_range_m": 4.0,
-      "gps_speed_threshold_ms": 0.1
-    },
-    "communication_parameters": {
-      "mqtt_port": 1883,
-      "mqtt_keepalive": 60,
-      "heartbeat_interval_sec": 5,
-      "max_topic_length": 512,
-      "max_payload_length": 1024,
-      "buffer_size": 2048
-    },
-    "loop_frequencies": {
-      "state_machine_hz": 100,
-      "fusion_hz": 100,
-      "vision_hz": 100,
-      "path_planning_hz": 10
-    },
-    "hardware_parameters": {
-      "cpu_cores": 4,
-      "memory_mb": 4096,
-      "storage_gb": 32,
-      "gpio_pins": 40,
-      "i2c_buses": 2,
-      "spi_buses": 2,
-      "uart_ports": 5,
-      "camera_interfaces": 2,
-      "usb_ports": 4
-    },
-    "pico_config": {
-      "uart_device": "/dev/ttyAMA1",
-      "baudrate": 115200,
-      "uart_timeout_ms": 1000,
-      "battery_profile": "battery_24v_lipo"
-    },
-    "pico_logging": {
-      "level": "debug",
-      "file": "/opt/smartmower/log/pico_bridge.log",
-      "data_dir": "/opt/smartmower/data/pico"
-    },
-    "gps_config": {
-      "uart_device": "/dev/ttyAMA2",
-      "baudrate": 115200,
-      "uart_timeout_ms": 1000,
-      "protocol": "nmea",
-      "max_satellites": 24
-    },
-    "gps_logging": {
-      "level": "debug",
-      "file": "/opt/smartmower/log/gps_bridge.log",
-      "data_dir": "/opt/smartmower/data/gps"
-    },
-    "sensors": {
-      "gps_accuracy_threshold": 2.0,
-      "imu_calibration_samples": 1000,
-      "ultrasonic_timeout": 100,
-      "rain_sensor_threshold": 500,
-      "tilt_angle_limit": 30
-    }
-  },
-  "fusion_config": {
-    "tuning": {
-      "pid": {
-        "linear_kp": 1.0,
-        "linear_ki": 0.1,
-        "linear_kd": 0.05,
-        "angular_kp": 2.0,
-        "angular_ki": 0.2,
-        "angular_kd": 0.1
-      }
-    },
-    "imu": {
-      "update_rate_hz": 100,
-      "accel_range_g": 4,
-      "gyro_range_dps": 500,
-      "mag_range_ut": 4800,
-      "calibration": {
-        "accel_offset": [0.0, 0.0, 0.0],
-        "gyro_offset": [0.0, 0.0, 0.0],
-        "mag_offset": [0.0, 0.0, 0.0],
-        "mag_scale": [1.0, 1.0, 1.0]
-      }
-    },
-    "gps": {
-      "update_rate_hz": 5,
-      "timeout_ms": 2000,
-      "hdop_threshold": 3.0,
-      "min_satellites": 4
-    },
-    "fusion_parameters": {
-      "update_rate_hz": 100,
-      "publish_rate_hz": 20,
-      "process_noise": {
-        "position": 0.1,
-        "velocity": 0.1,
-        "orientation": 0.01
-      },
-      "measurement_noise": {
-        "gps_position": 1.0,
-        "imu_accel": 0.1,
-        "imu_gyro": 0.01,
-        "odometry": 0.05
-      },
-      "filter_alpha": {
-        "velocity": 0.2,
-        "position": 0.1,
-        "orientation": 0.3
-      }
-    },
-    "mqtt_settings": {
-      "qos": 1,
-      "retain": false,
-      "keepalive": 60
-    }
-  },
-  "fusion_logging": {
-    "enabled": true,
-    "level": "info",
-    "file": "/opt/smartmower/log/fusion_sensor.log",
-    "save_raw_data": false,
-    "data_dir": "/opt/smartmower/data/fusion"
-  },
-  "hardware": {
-    "dimensions": {
-      "robot_length": 0.6,
-      "robot_width": 0.4,
-      "robot_height": 0.25,
-      "wheel_base": 0.35,
-      "wheel_diameter": 0.2,
-      "wheel_track": 0.3,
-      "ground_clearance": 0.05,
-      "weight": 15.0
-    },
-    "blade": {
-      "diameter": 0.18,
-      "offset_x": 0.0,
-      "offset_y": 0.15,
-      "cutting_deck_width": 0.2
-    },
-    "motors": {
-      "motors_max_rpm": 5000,
-      "motors_gear_ratio": 185.0,
-      "motors_encoder_pulses_per_rev": 12,
-      "blade_motor_max_rpm": 6000,
-      "blade_motor_gear_ratio": 1.0,
-      "blade_motor_encoder_pulses_per_rev": 6
-    }
-  },
-  "system": {
-    "safety": {
-      "emergency_stop_enabled": true,
-      "lift_sensor_enabled": true,
-      "theft_alarm_enabled": false,
-      "geofence_enabled": true
-    }
-  },
-  "path_planning_config": {
-    "area_config": {
-      "total_area_m2": 6000,
-      "boundary_type": "rectangular",
-      "dimensions": {
-        "width_m": 77.46,
-        "height_m": 77.46
-      },
-      "center_position": {
-        "x": 0.0,
-        "y": 0.0
-      },
-      "perimeter_buffer_m": 0.5
-    },
-    "navigation_config": {
-      "max_speed_mps": 0.8,
-      "min_speed_mps": 0.2,
-      "turn_radius_m": 0.5,
-      "waypoint_spacing_m": 5.0,
-      "max_waypoints_per_plan": 2000
-    },
-    "obstacle_config": {
-      "detection_buffer_m": 1.0,
-      "avoidance_buffer_m": 1.5,
-      "permanent_obstacles": [
-        {
-          "id": 1,
-          "name": "Large Oak Tree",
-          "center": {"x": -20.0, "y": 15.0},
-          "radius": 2.5,
-          "type": "tree"
-        },
-        {
-          "id": 2,
-          "name": "Pine Tree",
-          "center": {"x": 25.0, "y": -10.0},
-          "radius": 3.0,
-          "type": "tree"
-        },
-        {
-          "id": 3,
-          "name": "Garden Shed",
-          "center": {"x": 30.0, "y": 30.0},
-          "radius": 4.0,
-          "type": "structure"
-        }
-      ],
-      "temporary_obstacle_timeout_s": 300,
-      "max_temporary_obstacles": 20
-    },
-    "pattern_specific": {
-      "spiral": {
-        "start_from": "perimeter",
-        "direction": "clockwise",
-        "spiral_step_m": 0.27,
-        "max_rotations": 10,
-        "center_approach": "gradual"
-      },
-      "linear": {
-        "line_direction": "auto",
-        "alternating_direction": true,
-        "line_spacing_m": 0.27,
-        "turn_style": "u_turn",
-        "optimize_for_area": true
-      },
-      "adaptive": {
-        "growth_data_days": 7,
-        "efficiency_weight": 0.6,
-        "coverage_weight": 0.4,
-        "battery_optimization": true,
-        "weather_consideration": true
-      }
-    },
-    "optimization_config": {
-      "minimize_turns": true,
-      "smooth_path": true,
-      "avoid_wet_areas": true,
-      "energy_efficiency_priority": 0.7
-    },
-    "safety_config": {
-      "emergency_stop_distance_m": 0.5,
-      "collision_avoidance_distance_m": 1.0,
-      "perimeter_safety_distance_m": 0.3,
-      "max_slope_degrees": 15,
-      "weather_restrictions": {
-        "max_wind_speed_kmh": 30,
-        "no_rain_operation": true,
-        "min_temperature_c": 5,
-        "max_temperature_c": 40
-      }
-    },
-    "performance_config": {
-      "target_coverage_percentage": 95.0,
-      "max_planning_time_s": 30,
-      "replan_trigger_threshold": 5,
-      "path_validation_enabled": true,
-      "real_time_optimization": true,
-      "adaptive_speed_control": true
-    },
-    "integration_config": {
-      "state_machine_integration": true,
-      "vision_system_integration": true,
-      "gps_integration": true,
-      "fusion_data_integration": true,
-      "real_time_obstacle_updates": true,
-      "dynamic_replanning": true
-    }
-  },
-  "path_planning_logging": {
-    "level": "info",
-    "file": "/opt/smartmower/log/path_planning.log",
-    "data_dir": "/opt/smartmower/data/path_planning",
-    "max_log_size_mb": 100,
-    "log_rotation_count": 5,
-    "performance_logging": true,
-    "debug_waypoints": false
-  },
-  "slam_config": {
-    "mapping": {
-      "resolution": 0.1,
-      "width": 100,
-      "height": 100,
-      "origin_x": 5.0,
-      "origin_y": 5.0,
-      "occupancy_threshold": 50,
-      "free_threshold": 10
-    },
-    "localization": {
-      "particle_count": 100,
-      "motion_model_noise": [0.1, 0.1, 0.05],
-      "sensor_model_noise": 0.1,
-      "update_rate_hz": 10
-    },
-    "sensors": {
-      "sonar_angles_deg": [-30.0, 0.0, 30.0],
-      "sonar_max_range": 4.0,
-      "sonar_min_range": 0.1,
-      "sonar_offsets": [0.2, 0.0, -0.2]
-    },
-    "robot_parameters": {
-      "wheelbase": 0.3,
-      "wheel_radius": 0.1,
-      "encoder_ticks_per_rev": 1024
-    }
-  },
-  "slam_logging": {
-    "level": "info",
-    "file": "/opt/smartmower/log/slam.log",
-    "data_dir": "/opt/smartmower/data/slam",
-    "publish_map": true,
-    "publish_pose": true,
-    "save_map_interval_s": 60,
-    "map_save_path": "/opt/smartmower/data/slam/maps/"
-  },
+
   "gps_config": {
     "uart_device": "/dev/ttyAMA2",
     "baudrate": 115200,
@@ -684,236 +267,208 @@
     "max_size_mb": 10,
     "max_files": 5
   },
-  "vision_config": {
-    "camera": {
-      "device": "/dev/video0",
-      "width": 640,
-      "height": 480,
-      "fps": 30,
-      "rotation": 0,
-      "flip": "none",
-      "height_m": 0.3,
-      "intrinsics": {
-        "focal_length_x": 350.0,
-        "focal_length_y": 350.0,
-        "principal_point_x": 320.0,
-        "principal_point_y": 240.0,
-        "focal_length": 600.0
-      }
-    },
-    "detection": {
-      "obstacle_detection": {
-        "parameters": {
-          "max_detection_range": 5.0,
-          "min_obstacle_distance": 0.1,
-          "min_obstacle_height": 0.05,
-          "max_obstacle_height": 2.0,
-          "confidence_threshold": 0.7,
-          "min_points_threshold": 70,
-          "displacement_threshold": 0.08,
-          "publish_threshold": 0.08,
-          "debug_enabled": false
-        },
-        "sfm_parameters": {
-          "max_corners": 150,
-          "quality_level": 0.005,
-          "min_distance": 15.0,
-          "block_size": 5,
-          "harris_k": 0.04,
-          "min_track_frames": 2,
-          "max_optical_flow_error": 100.0
-        }
-      },
-      "perimeter_detection": {
-        "detection_parameters": {
-          "min_contour_area": 50,
-          "threshold_value": 50,
-          "blur_size": 3,
-          "erode_iterations": 1,
-          "dilate_iterations": 1,
-          "hough_threshold": 50,
-          "min_line_length": 30,
-          "max_line_gap": 10
-        },
-        "color_detection": {
-          "wire_color_low": [0, 0, 100],
-          "wire_color_high": [180, 30, 255]
-        },
-        "validation": {
-          "min_wire_segments": 2,
-          "max_wire_distance": 1.5
-        },
-        "distance_thresholds": {
-          "warning_distance_m": 1.5,
-          "alert_distance_m": 0.8,
-          "max_distance_m": 5.0
-        }
-      },
-      "grass_detection": {
-        "parameters": {
-          "grass_low_h": 30,
-          "grass_high_h": 90,
-          "min_saturation": 40,
-          "min_value": 40,
-          "min_grass_area": 100,
-          "morphological": {
-            "kernel_size": 5,
-            "kernel_type": "ellipse"
-          },
-          "height": {
-            "min_cm": 0.5,
-            "max_cm": 25.0
-          },
-          "processing": {
-            "frame_timeout_ms": 100
-          },
-          "visualization": {
-            "grass_color": [0, 200, 0],
-            "overlay_alpha": 0.3,
-            "text_color": [255, 255, 255],
-            "text_thickness": 2,
-            "text_scale": 0.7
-          }
-        },
-        "debug_enabled": false,
-        "log_level": "info"
-      }
-    }
-  },
-  "vision_logging": {
-    "level": "info",
-    "enabled": true,
-    "show_windows": true,
-    "camera": {
-      "file": "/opt/smartmower/log/vision_camera.log",
-      "data_dir": "/opt/smartmower/data/vision/camera"
-    },
-    "grass_detection": {
-      "file": "/opt/smartmower/log/vision_grass.log",
-      "data_dir": "/opt/smartmower/data/vision/grass"
-    },
-    "obstacle_detection": {
-      "file": "/opt/smartmower/log/vision_obstacle.log",
-      "data_dir": "/opt/smartmower/data/vision/obstacle"
-    },
-    "perimeter_detection": {
-      "file": "/opt/smartmower/log/vision_perimeter.log",
-      "data_dir": "/opt/smartmower/data/vision/perimeter"
-    }
-  },
-  "state_machine_config": {
-    "robot_parameters": {
-      "area": {
-        "total_area_sqm": 6000,
-        "dock_position": {
-          "x": 0.0,
-          "y": 0.0
-        },
-        "dock_tolerance_m": 0.5
-      },
-      "navigation": {
-        "max_speed_mps": 1.11,
-        "min_speed_mps": 0.1,
-        "turn_radius_m": 0.3,
-        "obstacle_avoidance": true,
-        "perimeter_safety_distance_m": 0.2
-      },
-      "obstacle_detection": {
-        "camera": {
-          "detection_range_m": 3.0,
-          "warning_distance_m": 2.0,
-          "deceleration_factor": 0.7
-        },
-        "sonar": {
-          "detection_range_m": 1.5,
-          "warning_distance_m": 0.5,
-          "critical_distance_m": 0.3,
-          "deceleration_factor": 0.3,
-          "stop_distance_m": 0.15
-        },
-        "bumper": {
-          "contact_speed_mps": 0.05,
-          "emergency_stop": true
-        },
-        "fallback": {
-          "default_sonar_distance_m": 2.0,
-          "default_camera_distance_m": 5.0,
-          "sensor_timeout_ms": 1000,
-          "safe_mode_speed_factor": 0.2
-        }
-      }
-    },
-    "timeouts": {
-      "init_timeout_s": 30,
-      "docking_timeout_s": 300,
-      "undocking_timeout_s": 60,
-      "charging_timeout_s": 14400,
-      "mowing_session_max_s": 7200
-    },
-    "state_definitions": {
-      "init": {
-        "enabled": true,
-        "timeout_s": 30,
-        "required_sensors": ["imu", "gps", "battery"],
-        "required_services": ["mqtt", "fusion"]
-      },
-      "idle": {
-        "enabled": true,
-        "heartbeat_interval_s": 30,
-        "auto_start_conditions": {
-          "battery_min": 80.0,
-          "weather_check": false
-        }
-      },
-      "mowing": {
-        "enabled": true,
-        "area_coverage_target": 6000,
-        "battery_return_threshold": 25.0,
-        "obstacle_pause_duration_s": 10,
-        "progress_report_interval_s": 300
-      },
-      "charging": {
-        "enabled": true,
-        "max_charging_time_s": 14400,
-        "resume_mission_battery_level": 80.0,
-        "full_charge_level": 95.0
-      },
-      "emergency": {
-        "enabled": true,
-        "auto_recovery": false,
-        "manual_reset_required": true,
-        "emergency_contacts": []
-      }
-    },
-    "debug": {
-      "enabled": false,
-      "simulation_mode": false,
-      "test_events": {
-        "enabled": false,
-        "init_complete_delay_s": 10,
-        "start_mowing_delay_s": 20
-      }
-    }
-  },
-  "state_machine_logging": {
-    "level": "info",
-    "file": "/opt/smartmower/log/state_machine.log",
-    "data_dir": "/opt/smartmower/data/state_machine",
-    "max_file_size_mb": 10,
-    "backup_count": 5,
-    "console_output": true
-  },
+
   "pico_config": {
     "uart_device": "/dev/ttyAMA1",
     "baudrate": 115200,
-    "uart_timeout_ms": 1000,
-    "battery_profile": "battery_24v_lipo"
+    "uart_timeout_ms": 1000
   },
   "pico_logging": {
-    "level": "info",
+    "level": "debug",
     "file": "/opt/smartmower/log/pico_bridge.log",
-    "max_size_mb": 10,
-    "max_files": 5
+    "data_dir": "/opt/smartmower/data/pico"
   },
-  "unused": {}
+
+  "state_machine": {
+    "timeouts": {
+      "init_timeout": 30,
+      "undocking_timeout": 120,
+      "docking_timeout": 300,
+      "manual_control_timeout": 600,
+      "charging_timeout": 14400,
+      "error_timeout": 300,
+      "component_heartbeat_timeout": 10,
+      "gps_timeout": 5000,
+      "vision_timeout": 100
+    },
+    "events": [
+      "EVENT_INIT_COMPLETE",
+      "EVENT_START_MOWING",
+      "EVENT_BATTERY_LOW",
+      "EVENT_BATTERY_FULL",
+      "EVENT_EMERGENCY_STOP",
+      "EVENT_MANUAL_CONTROL",
+      "EVENT_ERROR_OCCURRED",
+      "EVENT_PAUSE",
+      "EVENT_RESUME",
+      "EVENT_EMERGENCY_RECOVER",
+      "EVENT_DOCKING_COMPLETE",
+      "EVENT_UNDOCKING_COMPLETE",
+      "EVENT_OBSTACLE_DETECTED",
+      "EVENT_PERIMETER_CROSSED",
+      "EVENT_AREA_COMPLETE",
+      "EVENT_TIMEOUT",
+      "EVENT_PICO_CONNECTED",
+      "EVENT_GPS_CONNECTED"
+    ]
+  },
+
+  "slam_config": {
+    "subscriptions": {
+      "vodometry": "smartmower/vision/odometry/data",
+      "vobstacle": "smartmower/vision/obstacle/data",
+      "gps": "smartmower/bridge/gps/data",
+      "pico": "smartmower/bridge/pico/data",
+      "pico_status": "smartmower/bridge/pico/status"
+    },
+    "initial_position": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "initial_orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "mapping": {
+      "resolution": 0.1,
+      "width_meters": 100.0,
+      "height_meters": 100.0,
+      "origin_x": 0.0,
+      "origin_y": 0.0
+    },
+    "obstacle_detection": {
+      "min_distance": 0.3,
+      "max_distance": 4.0,
+      "filter_window_size": 5
+    },
+    "sensor_fusion": {
+      "sensor_weights": { "magnetometer": 0.3 },
+      "mag_declination_deg": 0.0,
+      "mag_calibration": {
+        "offset": { "x": 0.0, "y": 0.0, "z": 0.0 },
+        "scale": { "x": 1.0, "y": 1.0, "z": 1.0 },
+        "align_matrix": [
+          [1.0, 0.0, 0.0],
+          [0.0, 1.0, 0.0],
+          [0.0, 0.0, 1.0]
+        ]
+      }
+    }
+  },
+
+  "navigation": {
+    "map": {
+        "resolution_m": 0.1,
+        "inflation_radius_m": 0.3,
+        "publish_rate_hz": 2,
+        "obstacle_timeout_s": 5
+    }
+  },
+
+  "system": {
+    "safety": {
+      "emergency_stop_enabled": true,
+      "lift_sensor_enabled": true,
+      "theft_alarm_enabled": true,
+      "geofence_enabled": true,
+      "geofence": {
+        "enabled": true,
+        "polygon": [
+          [45.4642, 9.19],
+          [45.4643, 9.19],
+          [45.4643, 9.1901],
+          [45.4642, 9.1901]
+        ]
+      }
+    },
+    "hardware": {
+      "dimensions": {
+        "robot_length": 0.6,
+        "robot_width": 0.4,
+        "robot_height": 0.25,
+        "wheel_base": 0.35,
+        "wheel_diameter": 0.2,
+        "wheel_track": 0.3,
+        "ground_clearance": 0.05,
+        "weight": 15
+      },
+      "blade": {
+        "diameter": 0.18,
+        "offset_x": 0.25,
+        "offset_y": 0,
+        "cutting_deck_width": 0.2
+      },
+      "motors": {
+        "motors_max_rpm": 5000,
+        "motors_gear_ratio": 185,
+        "motors_encoder_pulses_per_rev": 12,
+        "blade_motor_max_rpm": 6000,
+        "blade_motor_gear_ratio": 1,
+        "blade_motor_encoder_pulses_per_rev": 6
+      }
+    },
+    "battery": {
+      "type": "lifepo4_8s",
+      "low_threshold": 30,
+      "profiles": {
+        "lifepo4_8s": {
+          "type": "lithium_iron_phosphate",
+          "cells": 8,
+          "nominal_voltage_per_cell": 3.2,
+          "max_voltage_per_cell": 3.6,
+          "min_voltage_per_cell": 2.5,
+          "capacity_ah": 12,
+          "nominal_pack_voltage": 25.6,
+          "max_pack_voltage": 28.8,
+          "min_pack_voltage": 20.0,
+          "charging": {
+            "full_voltage_per_cell": 3.55,
+            "trickle_current_ma": 300,
+            "stable_time_seconds": 800,
+            "current_threshold_ma": 150
+          },
+          "per_cell_curve": {
+            "100": 3.6,
+            "90": 3.4,
+            "80": 3.35,
+            "70": 3.32,
+            "60": 3.3,
+            "50": 3.28,
+            "40": 3.26,
+            "30": 3.24,
+            "20": 3.2,
+            "10": 3.0,
+            "5": 2.8,
+            "0": 2.5
+          },
+          "ocv_to_pct": [
+            [20.0, 0],
+            [22.4, 5],
+            [24.0, 10],
+            [25.6, 20],
+            [25.92, 30],
+            [26.08, 40],
+            [26.24, 50],
+            [26.4, 60],
+            [26.56, 70],
+            [26.8, 80],
+            [27.2, 90],
+            [28.8, 100]
+          ]
+          }
+        }
+    },
+    "supervisor": {
+      "autostart": false
+    }
+  },
+
+  "metadata": {
+    "config_version": "1.1",
+    "robot_id": "smartmower_001",
+    "last_modified": "2025-08-20T23:21:09+02:00"
+  }
 }

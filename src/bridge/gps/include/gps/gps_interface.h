@@ -22,6 +22,11 @@ public:
 };
 
 // Factory function per creare l'istanza corretta del GPS
-std::unique_ptr<GPSInterface> createGPSInterface(const std::string& device, int baud_rate);
+std::unique_ptr<GPSInterface> createGPSInterface(
+    const std::string& device, 
+    int baud_rate,
+    int timeout_ms = 1000, 
+    int max_satellites = 24
+);
 
 #endif // GPS_INTERFACE_H

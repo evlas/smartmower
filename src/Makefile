@@ -17,7 +17,7 @@ SMARTMOWER_GROUP ?= smartmower
 MODULES = pico gps fusion path_planning slam state_machine
 VISION_MODULES = vision/camera vision/grass vision/obstacle vision/perimeter
 
-.PHONY: all build install install-dirs install-config install-systemd install-web clean help
+.PHONY: all build install install-dirs install-config install-web clean help
 
 all: build
 
@@ -60,12 +60,7 @@ install-config: install-dirs
 	sudo chmod 644 $(ETCDIR)/robot_config.json
 	@echo "=== Configuration Installed ==="
 
-# Install systemd services
-install-systemd:
-	@echo "=== Installing Systemd Services ==="
-	sudo cp config/systemd/*.service $(SYSTEMDDIR)/
-	sudo systemctl daemon-reload
-	@echo "=== Systemd Services Installed ==="
+# (disabilitato) Installazione systemd gestita solo dal Supervisor
 
 # Create system user and group
 create-user:
@@ -107,7 +102,6 @@ install: build install-dirs install-config install-web set-permissions
 		echo "Installing $$module..."; \
 		$(MAKE) -C $$module install || exit 1; \
 	done
-	$(MAKE) install-systemd
 	@echo "=== Installation Complete ==="
 	@echo ""
 	@echo "Smart Mower System installed to $(PREFIX)"
@@ -115,15 +109,7 @@ install: build install-dirs install-config install-web set-permissions
 	@echo "Logs: $(LOGDIR)/"
 	@echo "Data: $(DATADIR)/"
 	@echo ""
-	@echo "To enable and start services:"
-	@echo "  sudo systemctl enable smartmower-pico smartmower-gps smartmower-fusion"
-	@echo "  sudo systemctl enable smartmower-path-planning smartmower-slam smartmower-state-machine"
-	@echo "  sudo systemctl enable smartmower-vision-camera smartmower-vision-grass"
-	@echo "  sudo systemctl enable smartmower-vision-obstacle smartmower-vision-perimeter"
-	@echo "  sudo systemctl enable smartmower-web"
-	@echo "  sudo systemctl start smartmower-state-machine smartmower-web"
-	@echo ""
-	@echo "Web interface will be available at: http://localhost:8080"
+	@echo "I processi saranno avviati/fermati dal Supervisor; nessuna unit systemd viene installata qui."
 
 # Clean all modules
 clean:
@@ -140,11 +126,7 @@ clean:
 
 # Uninstall
 uninstall:
-	@echo "=== Uninstalling Smart Mower System ==="
-	sudo systemctl stop smartmower-* 2>/dev/null || true
-	sudo systemctl disable smartmower-* 2>/dev/null || true
-	sudo rm -f $(SYSTEMDDIR)/smartmower-*.service
-	sudo systemctl daemon-reload
+	@echo "=== Uninstalling Smart Mower System (binari e dati) ==="
 	sudo rm -rf $(PREFIX)
 	@echo "=== Uninstall Complete ==="
 
@@ -155,7 +137,7 @@ help:
 	@echo "  install        - Full installation to $(PREFIX)"
 	@echo "  install-dirs   - Create installation directories"
 	@echo "  install-config - Install configuration files"
-	@echo "  install-systemd- Install systemd services"
+	@echo "  (systemd non gestito qui; solo Supervisor usa systemd)"
 	@echo "  create-user    - Create system user and group"
 	@echo "  set-permissions- Set proper ownership and permissions"
 	@echo "  clean          - Clean all build artifacts"

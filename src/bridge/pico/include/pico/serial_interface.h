@@ -4,6 +4,8 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <cstdint>
+#include <sys/types.h>
 
 namespace pico {
 
@@ -11,7 +13,7 @@ class SerialInterface {
 public:
     using DataCallback = std::function<void(const std::vector<uint8_t>&)>;
     
-    SerialInterface(const std::string& device, int baudrate);
+    SerialInterface(const std::string& device, int baudrate, int timeout_ms = 1000);
     ~SerialInterface();
     
     bool open();
@@ -26,6 +28,7 @@ public:
 private:
     std::string device_;
     int baudrate_;
+    int timeout_ms_;
     int fd_;
     bool running_;
     DataCallback data_callback_;

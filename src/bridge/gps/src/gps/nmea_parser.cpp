@@ -52,6 +52,9 @@ bool NMEAParser::parse(const string& nmea_sentence, GPSData& data) {
         return parseGGA(tokens, data);
     } else if (nmea_type == "GPRMC") {
         return parseRMC(tokens, data);
+    } else if (nmea_type.size() >= 3 && nmea_type.substr(nmea_type.size()-3) == "GSA") {
+        // Gestisce GPGSA/GNGSA/GLGSA/BDGSA/GAGSA/QZGSA etc.
+        return parseGSA(tokens, data);
     }
     
     return false;
@@ -91,12 +94,41 @@ bool NMEAParser::parseGGA(const vector<string>& tokens, GPSData& data) {
         if (!tokens[6].empty()) {
             data.satellites = stoi(tokens[6]);
         }
-        
+
+        // HDOP (Horizontal Dilution of Precision)
+        if (!tokens[7].empty()) {
+            data.hdop = stod(tokens[7]);
+        }
+
         // Altitudine
         if (!tokens[8].empty()) {
             data.altitude = stod(tokens[8]);
         }
         
+        return true;
+    } catch (const exception&) {
+        return false;
+    }
+}
+
+bool NMEAParser::parseGSA(const vector<string>& tokens, GPSData& data) {
+    // Formato GSA: Mode1, Mode2, sat1..sat12, PDOP, HDOP, VDOP
+    if (tokens.size() < 17) {
+        return false;
+    }
+    try {
+        // PDOP / HDOP / VDOP agli indici 14, 15, 16
+        if (!tokens[14].empty()) {
+            data.pdop = stod(tokens[14]);
+        }
+        if (!tokens[15].empty()) {
+            // Preferisci HDOP da GGA; se non impostato, usa quello da GSA
+            double gsa_hdop = stod(tokens[15]);
+            if (data.hdop <= 0.0) data.hdop = gsa_hdop;
+        }
+        if (!tokens[16].empty()) {
+            data.vdop = stod(tokens[16]);
+        }
         return true;
     } catch (const exception&) {
         return false;

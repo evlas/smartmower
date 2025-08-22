@@ -1,0 +1,66 @@
+/* SmartMower Web Admin - stile minimale */
+:root{ --bg:#0b132b; --fg:#e0e1dd; --accent:#2a9d8f; --error:#e63946; }
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; height:100%; background:var(--bg); color:var(--fg); font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif; }
+header{ padding:16px 20px; background:#1c2541; border-bottom:1px solid #3a506b; }
+header h1{ margin:0; font-size:20px; }
+main{ max-width:980px; margin:20px auto; padding:0 16px; }
+section{ background:#1c2541; border:1px solid #3a506b; border-radius:8px; padding:16px; }
+section h2{ margin-top:0; }
+.controls{ display:flex; gap:8px; margin-bottom:12px; }
+button{ padding:8px 12px; border:1px solid #3a506b; background:#0b132b; color:var(--fg); border-radius:6px; cursor:pointer; }
+button:hover{ background:#111a35; }
+#config-json{ width:100%; min-height:360px; background:#0b132b; color:#e0e1dd; border:1px solid #3a506b; border-radius:6px; padding:10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:13px; }
+#status{ margin-top:10px; padding:8px; border-radius:6px; background:#0b132b; border:1px dashed #3a506b; color:#9fd3c7; }
+#status.error{ color:var(--fg); border-color:var(--error); background:#2a1b1b; }
+
+/* --- Tabs --- */
+.tabs{ display:flex; gap:8px; padding:8px 16px; border-bottom:1px solid #3a506b; background:#14203d; position:sticky; top:0; z-index:5; }
+.tab{ padding:8px 12px; border:1px solid #3a506b; border-bottom:none; background:transparent; color:var(--fg); border-top-left-radius:6px; border-top-right-radius:6px; cursor:pointer; }
+.tab:hover{ background:#111a35; }
+.tab.active{ background:#1c2541; color:#9fd3c7; border-color:#4b6b8a; }
+.tab:focus{ outline:2px solid #4b6b8a; outline-offset:2px; }
+
+.tab-panel{ display:none; margin-top:0; }
+.tab-panel.active{ display:block; }
+
+.muted{ color:#9aa7b3; font-size:0.9em; }
+.card{ background:#0b132b; border:1px solid #3a506b; border-radius:8px; padding:12px; }
+
+/* --- Forms per tab --- */
+.form{ display:grid; grid-template-columns: 200px 1fr; gap:10px 14px; margin-top:10px; align-items:center; }
+.form .form-row{ display:contents; }
+.form label{ color:#e0e1dd; }
+.form input[type="text"],
+.form input[type="number"],
+.form input[type="password"],
+.form select,
+.form textarea{
+  width:100%; padding:8px 10px; border:1px solid #3a506b; border-radius:6px;
+  background:#0b132b; color:#e0e1dd; font-size:14px;
+}
+.form input:focus, .form select:focus, .form textarea:focus{ outline:2px solid #4b6b8a; outline-offset:2px; }
+/* Titoli di gruppo nei form: occupano entrambe le colonne e separano i blocchi */
+.form h3{
+  grid-column: 1 / -1;
+  margin: 16px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid #3a506b;
+  color:#9fd3c7;
+  font-size: 16px;
+}
+.form h3:first-child{
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* Advanced details */
+details.advanced{ margin-top:14px; }
+details.advanced summary{ cursor:pointer; color:#9fd3c7; margin-bottom:8px; }
+
+@media (max-width: 720px){
+  .form{ grid-template-columns: 1fr; }
+  .form .form-row{ display:block; }
+  .form label{ display:block; margin-bottom:6px; }
+}

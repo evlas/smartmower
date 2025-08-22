@@ -5,11 +5,15 @@
 #include <stdexcept>
 #include <system_error>
 #include <cstring>
+#include <iostream>
+#include <string>
 
 class SerialGPS : public GPSInterface {
     int serial_fd_ = -1;
     std::string device_;
     int baud_rate_;
+    int timeout_ms_;
+    int max_satellites_;
     
     int translateBaudRate(int baud) {
         switch(baud) {
@@ -35,72 +39,93 @@ class SerialGPS : public GPSInterface {
         }
     }
     
+    bool configureSerialPort() {
+        struct termios tty;
+        
+        // Get current serial port settings
+        if (tcgetattr(serial_fd_, &tty) != 0) {
+            std::cerr << "Errore nella configurazione della porta seriale: " << strerror(errno) << std::endl;
+            return false;
+        }
+        
+        // Set baud rate
+        int baud = translateBaudRate(baud_rate_);
+        if (baud == -1) {
+            std::cerr << "Baud rate non supportato: " << baud_rate_ << std::endl;
+            return false;
+        }
+        
+        cfsetospeed(&tty, baud);
+        cfsetispeed(&tty, baud);
+        
+        // Set port parameters
+        tty.c_cflag &= ~PARENB;  // No parity
+        tty.c_cflag &= ~CSTOPB;  // 1 stop bit
+        tty.c_cflag &= ~CSIZE;
+        tty.c_cflag |= CS8;      // 8 bits per byte
+        tty.c_cflag &= ~CRTSCTS; // No hardware flow control
+        tty.c_cflag |= CREAD | CLOCAL; // Enable receiver, ignore control lines
+        
+        // Non-canonical mode
+        tty.c_lflag &= ~ICANON;
+        // Disable special character interpretation
+        tty.c_lflag &= ~(ECHO | ECHOE | ECHONL | IEXTEN | ISIG);
+        
+        // Disable input processing
+        tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Disable software flow control
+        tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL);
+        
+        // Disable output processing
+        tty.c_oflag &= ~OPOST;
+        tty.c_oflag &= ~ONLCR;
+        
+        // Set read timeout
+        tty.c_cc[VTIME] = timeout_ms_ / 100;  // Timeout in tenths of seconds
+        tty.c_cc[VMIN]  = 0;                  // Return immediately even with 0 bytes
+        
+        // Apply settings
+        if (tcsetattr(serial_fd_, TCSANOW, &tty) != 0) {
+            std::cerr << "Errore nell'applicazione delle impostazioni seriali: " << strerror(errno) << std::endl;
+            return false;
+        }
+        
+        // Flush input and output buffers
+        tcflush(serial_fd_, TCIOFLUSH);
+        
+        return true;
+    }
+    
 public:
-    SerialGPS(const std::string& device, int baud_rate) 
-        : device_(device), baud_rate_(baud_rate) {}
+    SerialGPS(const std::string& device, int baud_rate, int timeout_ms, int max_satellites)
+        : device_(device), baud_rate_(baud_rate), 
+          timeout_ms_(timeout_ms), max_satellites_(max_satellites) {}
     
     ~SerialGPS() override {
         shutdown();
     }
     
     bool initialize() override {
+        // Se la porta è già aperta, riconfigurala
         if (serial_fd_ >= 0) {
-            return true; // Già inizializzato
+            return configureSerialPort();
         }
         
-        // Apri la porta seriale
+        // Apri il dispositivo seriale
         serial_fd_ = open(device_.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
         if (serial_fd_ < 0) {
-            throw std::system_error(errno, std::system_category(), 
-                                  "Impossibile aprire il dispositivo " + device_);
+            std::cerr << "Errore nell'apertura del dispositivo " << device_ << ": " << strerror(errno) << std::endl;
+            return false;
         }
         
         // Configura la porta seriale
-        struct termios tty;
-        if (tcgetattr(serial_fd_, &tty) != 0) {
+        if (!configureSerialPort()) {
             close(serial_fd_);
             serial_fd_ = -1;
-            throw std::system_error(errno, std::system_category(), 
-                                  "Errore nella configurazione della porta seriale");
+            return false;
         }
         
-        // Imposta i parametri della porta seriale
-        cfsetospeed(&tty, translateBaudRate(baud_rate_));
-        cfsetispeed(&tty, translateBaudRate(baud_rate_));
-        
-        tty.c_cflag &= ~PARENB; // No parity
-        tty.c_cflag &= ~CSTOPB; // 1 stop bit
-        tty.c_cflag &= ~CSIZE;
-        tty.c_cflag |= CS8;     // 8 bits per byte
-        tty.c_cflag &= ~CRTSCTS; // No hardware flow control
-        tty.c_cflag |= CREAD | CLOCAL; // Abilita lettura, ignora linee di controllo
-        
-        // Modalità non canonica
-        tty.c_lflag &= ~ICANON;
-        tty.c_lflag &= ~ECHO; // Disabilita echo
-        tty.c_lflag &= ~ECHOE;
-        tty.c_lflag &= ~ECHONL;
-        tty.c_lflag &= ~ISIG; // Disabilita interpretazione caratteri speciali
-        
-        // Disabilita l'elaborazione dell'input
-        tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Disabilita controllo flusso software
-        tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL);
-        
-        // Disabilita l'elaborazione dell'output
-        tty.c_oflag &= ~OPOST; // Elaborazione output non elaborata
-        tty.c_oflag &= ~ONLCR;
-        
-        // Timeout di lettura: 100ms
-        tty.c_cc[VTIME] = 1;
-        tty.c_cc[VMIN] = 0;
-        
-        // Applica le impostazioni
-        if (tcsetattr(serial_fd_, TCSANOW, &tty) != 0) {
-            close(serial_fd_);
-            serial_fd_ = -1;
-            throw std::system_error(errno, std::system_category(), 
-                                  "Errore nell'applicazione delle impostazioni della porta seriale");
-        }
+        std::cout << "Porta seriale " << device_ << " configurata con successo (" 
+                  << baud_rate_ << " baud, timeout: " << timeout_ms_ << " ms)" << std::endl;
         
         return true;
     }
@@ -134,6 +159,11 @@ public:
 };
 
 // Factory function
-std::unique_ptr<GPSInterface> createGPSInterface(const std::string& device, int baud_rate) {
-    return std::make_unique<SerialGPS>(device, baud_rate);
+std::unique_ptr<GPSInterface> createGPSInterface(
+    const std::string& device, 
+    int baud_rate,
+    int timeout_ms,
+    int max_satellites
+) {
+    return std::make_unique<SerialGPS>(device, baud_rate, timeout_ms, max_satellites);
 }

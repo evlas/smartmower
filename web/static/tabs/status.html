@@ -1,0 +1,18 @@
+<section class="tab-panel status-map" aria-label="Stato e Mappa">
+  <div class="status-panel">
+    <div class="state">Stato: <span id="robot-state">—</span></div>
+    <div class="battery">Batteria: <span id="battery-pct">—%</span> <span id="battery-status" class="muted"></span></div>
+    <div class="controls">
+      <button id="btn-start">Start</button>
+      <button id="btn-pause">Pausa</button>
+      <button id="btn-stop">Stop</button>
+      <button id="btn-docking">Docking</button>
+    </div>
+    <div id="status" class="muted" role="status" aria-live="polite"></div>
+  </div>
+  <div class="map-panel">
+    <h2>Mappa prato (10.000 m²)</h2>
+    <!-- Quadrato 100m x 100m: scala definita in status.js -->
+    <canvas id="map" width="640" height="640" aria-label="Mappa prato"></canvas>
+  </div>
+</section>

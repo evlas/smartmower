@@ -4,11 +4,12 @@
 #include <unistd.h>
 #include <thread>
 #include <iostream>
+#include <chrono>
 
 namespace pico {
 
-SerialInterface::SerialInterface(const std::string& device, int baudrate)
-    : device_(device), baudrate_(baudrate), fd_(-1), running_(false) {}
+SerialInterface::SerialInterface(const std::string& device, int baudrate, int timeout_ms)
+    : device_(device), baudrate_(baudrate), timeout_ms_(timeout_ms), fd_(-1), running_(false) {}
 
 SerialInterface::~SerialInterface() {
     close();
@@ -28,6 +29,18 @@ bool SerialInterface::open() {
     // Imposta la velocità in baud
     cfsetispeed(&options, baudrate_);
     cfsetospeed(&options, baudrate_);
+    
+    // Imposta i parametri di base
+    options.c_cflag |= (CLOCAL | CREAD);
+    options.c_cflag &= ~CSIZE;
+    options.c_cflag |= CS8;         // 8-bit characters
+    options.c_cflag &= ~PARENB;     // No parity
+    options.c_cflag &= ~CSTOPB;     // 1 stop bit
+    options.c_cflag &= ~CRTSCTS;    // No hardware flow control
+    
+    // Configura il timeout di lettura
+    options.c_cc[VMIN] = 0;  // Non bloccante
+    options.c_cc[VTIME] = timeout_ms_ / 100;  // Timeout in decimi di secondo
     
     // Configura i parametri della porta
     options.c_cflag |= (CLOCAL | CREAD);

@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 
 namespace config {
 
@@ -98,6 +99,24 @@ std::unordered_map<std::string, std::string> ConfigManager::getObject(const std:
         }
         child = child->next;
     }
+    
+    return result;
+}
+
+nlohmann::json ConfigManager::getJsonObject(const std::string& key) {
+    cJSON* node = findNode(key);
+    if (!node) {
+        return nlohmann::json();
+    }
+    
+    // Convert cJSON to string and then parse with nlohmann::json
+    char* jsonStr = cJSON_PrintUnformatted(node);
+    if (!jsonStr) {
+        return nlohmann::json();
+    }
+    
+    nlohmann::json result = nlohmann::json::parse(jsonStr);
+    cJSON_free(jsonStr);
     
     return result;
 }
