@@ -72,7 +72,7 @@ Il robot è in grado di mappare aree di lavoro, pianificare percorsi di taglio o
 mower/
 ├── 📁 hardware/                    # Documentazione hardware
 │   ├── SCH_smartmower_1-Mother Board_2025-10-12.png  # Schema elettrico
-│   └── ProPrj_smartmower_2025-07-31_08-52-16_2025-10-12.epro  # Progetto KiCad
+│   └── ProPrj_smartmower_2025-07-31_08-52-16_2025-10-12.epro  # Progetto EasyEDA Pro
 │
 ├── 📁 mower_ws/                    # Workspace ROS 2
 │   ├── src/                        # Pacchetti sorgente
