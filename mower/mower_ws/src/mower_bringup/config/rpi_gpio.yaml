@@ -1,0 +1,14 @@
+rpi_gpio:
+  ros__parameters:
+    chip_name: "gpiochip0"
+    poll_rate_hz: 200
+    debounce_ms: 50
+    estop_pin: 4
+    estop_active_low: true
+    estop_topic: "/buttons/estop"
+    button_active_low: true
+    buttons_namespace: "/buttons"
+    ok_pin: 7
+    back_pin: 8
+    up_pin: 24
+    down_pin: 25

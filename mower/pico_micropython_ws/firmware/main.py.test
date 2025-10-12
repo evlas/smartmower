@@ -1,0 +1,100 @@
+# Minimal Pico firmware: initialize PCF8574 and send its state every 1s
+# UART0 @115200, COBS-framed MSG_EVENT payload carries raw PCF8574 port value
+
+from machine import UART, Pin, I2C
+import time
+import sys
+
+# Make app modules importable
+sys.path.append('/app')
+
+import pins_config as cfg
+from protocol import pack_frame, MSG_EVENT
+
+# ---- USB debug ----
+DEBUG = True
+def dbg(msg):
+    if not DEBUG:
+        return
+    try:
+        print('[DBG %08d] %s' % (time.ticks_ms(), msg))
+    except Exception:
+        pass
+
+# ---- UART and LED ----
+uart = UART(0, baudrate=115200, bits=8, parity=None, stop=1)
+led = Pin(25, Pin.OUT)
+led.off()
+dbg('UART0 init 115200 OK; LED ready')
+
+# ---- I2C + PCF8574 ----
+_i2c = I2C(0, sda=Pin(cfg.I2C0_SDA_PIN), scl=Pin(cfg.I2C0_SCL_PIN), freq=getattr(cfg, 'I2C0_FREQ_HZ', 400000))
+PCF_ADDR = getattr(cfg, 'PCF8574_ADDR', 0x20)
+
+dbg('Using raw I2C access for PCF8574 (no driver)')
+
+# Scan I2C bus to confirm device presence
+try:
+    addrs = _i2c.scan()
+    dbg('I2C scan: ' + ','.join(['0x%02X' % a for a in addrs]))
+except Exception as e:
+    dbg('I2C scan ERR: %s' % e)
+
+# Try to configure all pins high (inputs with pull-ups on PCF)
+try:
+    _i2c.writeto(PCF_ADDR, bytes((0xFF,)))
+    dbg('PCF8574 configured as inputs (0xFF)')
+except Exception as e:
+    dbg('PCF8574 config ERR: %s' % e)
+
+# ---- Protocol runtime ----
+out_seq = 0
+
+# Helper to send raw PCF8 in MSG_EVENT payload
+# We place the raw PCF value in the low byte, and 0x80 in the high byte as a marker
+# so the host can see a stable RAW mask even if no standard event bits are set.
+def send_pcf_raw(raw8: int):
+    global out_seq
+    payload = bytes((raw8 & 0xFF, 0x80))
+    frame = pack_frame(MSG_EVENT, payload, out_seq)
+    out_seq = (out_seq + 1) & 0xFF
+    # Blink LED on TX (pulse)
+    try:
+        led.on()
+    except Exception:
+        pass
+    uart.write(frame)
+    try:
+        time.sleep_ms(60)
+        led.off()
+    except Exception:
+        pass
+    dbg('TX EVENT RAW=0x%02X seq=%d' % (raw8 & 0xFF, (out_seq - 1) & 0xFF))
+
+PERIOD_MS = 1000
+last_tx = time.ticks_ms()
+
+while True:
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_tx) >= PERIOD_MS:
+        last_tx = now
+        try:
+            # Ensure inputs each cycle (PCF8574 requires 1s written)
+            try:
+                _i2c.writeto(PCF_ADDR, bytes((0xFF,)))
+            except Exception:
+                pass
+            # Read 1 byte directly
+            raw_bytes = _i2c.readfrom(PCF_ADDR, 1)
+            raw = raw_bytes[0] if raw_bytes and len(raw_bytes) > 0 else 0xFF
+            dbg('PCF read OK: RAW=0x%02X' % (raw & 0xFF))
+            send_pcf_raw(raw)
+        except Exception as e:
+            # On error, still send a marker frame with 0xFF
+            dbg('PCF read ERR: %s; sending RAW=0xFF' % e)
+            try:
+                send_pcf_raw(0xFF)
+            except Exception:
+                pass
+    # Yield a bit
+    time.sleep_ms(1)

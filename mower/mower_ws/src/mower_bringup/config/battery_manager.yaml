@@ -1,0 +1,35 @@
+battery_manager:
+  ros__parameters:
+    # Modalità corretta: battery_state con logica migliorata per gestire dati incompleti
+    battery_input_type: battery_state        # riceve BatteryState da pico_control_hardware
+    battery_topic: /battery                  # riceve dati batteria da pico_control_hardware
+
+    # Voltage model per calcolo percentage quando non disponibile nel BatteryState
+    voltage_max_v: 12.6    # 3S LiPo full (V)
+    voltage_min_v: 9.0     # 3S LiPo critical (V)
+
+    # Thresholds (percent values in [0..100])
+    low_battery_threshold_pct: 30.0
+    low_battery_clear_pct: 35.0
+    critical_battery_threshold_pct: 5.0
+    critical_battery_clear_pct: 8.0
+
+    # Fixed metadata to enrich BatteryState (used if implemented in node)
+    # Power supply status constants (from linux kernel include/linux/power_supply.h)
+    # 0 UNKNOWN, 1 CHARGING, 2 DISCHARGING, 3 NOT_CHARGING, 4 FULL
+    power_supply_status_default: 0
+
+    # Power supply health constants
+    # 0 UNKNOWN, 1 GOOD, 2 OVERHEAT, 3 DEAD, 4 OVERVOLTAGE, 5 UNSPEC_FAILURE, 6 COLD, 7 WATCHDOG_TIMER_EXPIRE, 8 SAFETY_TIMER_EXPIRE
+    power_supply_health: 1
+
+    # Power supply technology constants
+    # 0 UNKNOWN, 1 NIMH, 2 LION, 3 LIPO, 4 LIFE, 5 NICD, 6 LIMN
+    power_supply_technology: 3
+
+    # Presence and capacity metadata
+    present: true
+    capacity_ah: 5.0            # last full capacity (Ah)
+    design_capacity_ah: 5.0     # design capacity (Ah)
+
+    # Nota: cell_voltage rimosso perché non abbiamo dati specifici sulle singole celle

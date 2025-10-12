@@ -1,0 +1,30 @@
+events_bridge:
+  ros__parameters:
+    events_topic: /events/pcf8574
+    relay_state_topic: /relay/state
+    tilt_topic: /safety/tilt
+    lift_topic: /safety/lift
+    bumper_left_topic: /sensors/bumper_left
+    bumper_right_topic: /sensors/bumper_right
+    rain_topic: /sensors/rain
+    aux1_topic: /sensors/aux1
+    aux2_topic: /sensors/aux2
+    aux3_topic: /sensors/aux3
+    aux4_topic: /sensors/aux4
+    err_imu_topic: /errors/imu
+    err_batt_topic: /errors/batt
+    err_sonar_topic: /errors/sonar
+    err_odom_topic: /errors/odom
+    perimeter_left_topic: /sensors/perimeter_left
+    perimeter_right_topic: /sensors/perimeter_right
+
+    # Bit mapping from the UInt16 mask coming from pico firmware
+    bit_relay_enabled: 0       # 1<<0
+    bit_bumper_left: 1         # 1<<1
+    bit_bumper_right: 2        # 1<<2
+    bit_lift: 3                # 1<<3
+    bit_rain: 4                # 1<<4
+    bit_aux4: 11               # 1<<11 (tilt)
+    bit_tilt: 11                # 1<<11
+    bit_perimeter_left: 8      # 1<<8
+    bit_perimeter_right: 9     # 1<<9

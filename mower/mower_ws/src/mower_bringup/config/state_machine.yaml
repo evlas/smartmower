@@ -1,0 +1,5 @@
+state_machine_node:
+  ros__parameters:
+    cmd_timeout: 1.0
+    auto_resume: false
+    start_on_boot: false

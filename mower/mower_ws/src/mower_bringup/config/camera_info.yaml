@@ -1,0 +1,26 @@
+image_width: 640
+image_height: 480
+camera_name: camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [450.0, 0.0, 320.0,   # fx, 0, cx - valori realistici per ov5647
+         0.0, 450.0, 240.0,   # 0, fy, cy - rapporto 1:1 per pixel quadrati
+         0.0, 0.0, 1.0]       # 0, 0, 1
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.0, 0.0, 0.0, 0.0, 0.0]  # Nessuna distorsione per configurazione di base
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0,
+         0.0, 1.0, 0.0,
+         0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [450.0, 0.0, 320.0, 0.0,   # fx, 0, cx, 0
+         0.0, 450.0, 240.0, 0.0,   # 0, fy, cy, 0
+         0.0, 0.0, 1.0, 0.0]       # 0, 0, 1, 0

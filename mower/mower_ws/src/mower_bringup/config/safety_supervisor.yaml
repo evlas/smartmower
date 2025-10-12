@@ -1,0 +1,5 @@
+safety_supervisor:
+  ros__parameters:
+    error_timeout_sec: 120.0
+    error_level: "ERROR"
+    hardware_id: "safety_supervisor"

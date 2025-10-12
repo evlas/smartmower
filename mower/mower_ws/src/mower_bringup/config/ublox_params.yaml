@@ -1,0 +1,24 @@
+ublox_gps_node:
+  ros__parameters:
+    # Configurazione dispositivo
+    device: "/dev/ttyAMA1"
+    baudrate: 115200
+
+    # Frame ID per i messaggi
+    frame_id: "gps_link"
+    use_sim_time: false
+
+    # Configurazione porta seriale
+    uart1:
+      baudrate: 115200
+
+    # Configurazione messaggi NMEA
+    nmea:
+      enable: false
+      use_trimble: false
+
+    # Configurazione messaggi UBX
+    ubx:
+      navpvt: true
+      navsat: true
+      navstatus: true

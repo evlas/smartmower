@@ -1,0 +1,21 @@
+blade_manager:
+  ros__parameters:
+    # Topic configuration
+    state_topic: /mower/state
+    rpm_topic: /blades/rpm
+    blades_cmd_topic: /actuators/blades_cmd
+
+    # Enable blades when in these states
+    enable_states: [MOWING]
+
+    # Control parameters
+    target_speed: 0.8              # 0.0..1.0 command to both blades
+    min_command_threshold: 0.1     # below this, do not check stall
+
+    # Stall detection
+    stall_rpm_threshold: 300.0     # RPM threshold under which we consider stalling
+    stall_window_sec: 1.0          # seconds under threshold before declaring stall
+
+    # Retry policy
+    retry_delay_sec: 2.0           # wait before retrying after stall
+    max_retries: 3                 # after this, emit error and stop

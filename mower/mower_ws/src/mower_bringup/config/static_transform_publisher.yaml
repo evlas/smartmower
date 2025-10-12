@@ -1,0 +1,4 @@
+# Static transform publisher - uses command line arguments
+# No parameters needed as arguments are passed via command line
+static_transform_publisher:
+  ros__parameters: {}

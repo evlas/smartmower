@@ -1,0 +1,5 @@
+relay_manager:
+  ros__parameters:
+    # Topic configuration - aggiornato per pico_control_hardware
+    state_topic: /mower/state
+    relay_cmd_topic: /relay/cmd    # Compatibile con pico_control_hardware

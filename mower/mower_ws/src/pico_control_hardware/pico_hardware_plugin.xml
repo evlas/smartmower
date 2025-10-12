@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<library path="pico_control_hardware">
+  <class
+    name="pico_control_hardware/PicoSystemHardware"
+    type="pico_control_hardware::PicoSystemHardware"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>ROS 2 Control SystemInterface for Pico-based mower drivetrain</description>
+  </class>
+</library>
