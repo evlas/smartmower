@@ -127,9 +127,9 @@ mower/
 | **Controller hardware** | Raspberry Pi Pico | Sensori (IMU, odometria) e attuatori |
 | **GPS** | uBlox F10N | Posizionamento preciso per navigazione |
 | **Camera** | Raspicam Module v1 | Visione monoculare per RTAB-Map |
-| **Motori** | 2x DC motor + encoder | Movimento differenziale |
+| **Motori** | 2x motori brushless + encoder | Movimento differenziale |
 | **Lame** | 2x motori brushless | Sistema di taglio |
-| **Batteria** | Li-Ion 12.6V | Alimentazione principale |
+| **Batteria** | Li-Ion 6S | Alimentazione principale |
 | **Sensori** | IMU MPU6050, 3x sonar | Orientamento e ostacoli (via Pico) |
 
 ## 🚀 Installazione
@@ -140,12 +140,12 @@ mower/
 sudo apt update && sudo apt upgrade
 sudo apt install python3-pip git cmake build-essential
 
-# ROS 2 Humble
+# ROS 2 Jazzy
 sudo apt install software-properties-common
 sudo add-apt-repository universe
 sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-sudo apt update && sudo apt install ros-humble-desktop
+sudo apt update && sudo apt install ros-jazzy-desktop
 
 # MicroPython per Pico
 sudo apt install python3-venv
@@ -294,7 +294,7 @@ ros2 launch mower_bringup bringup_pico.launch.py
 ## 📚 Documentazione Dettagliata
 
 ### Sistema Base
-- **ROS 2 Humble** - Framework robotico
+- **ROS 2 Jazzy** - Framework robotico
 - **Raspberry Pi OS** - Sistema operativo
 - **MicroPython** - Firmware per Raspberry Pi Pico
 
