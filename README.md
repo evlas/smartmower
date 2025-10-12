@@ -132,25 +132,6 @@ mower/
 | **Batteria** | Li-Ion 12.6V | Alimentazione principale |
 | **Sensori** | IMU MPU6050, 3x sonar | Orientamento e ostacoli (via Pico) |
 
-### Pinout Raspberry Pi 5
-```
-Raspberry Pi 5 GPIO (40-pin header)
-┌─────────────────────────────────────┐
-│  3.3V  5V  GND  14  15  18  GND  23 │
-│   2   3   4   17  27  22  25  24    │
-│   7  GND  8   31  GND  26  GND  19  │
-│  10   9  11  GND   5   6  12  13   │
-│  16  26  20  GND  21  19  16  26   │
-└─────────────────────────────────────┘
-```
-
-### Collegamenti Principali
-- **UART**: Pico ↔ Raspberry Pi (TX/RX/GND)
-- **I2C**: IMU, display OLED
-- **GPIO**: Encoder ruote, finecorsa, relay
-- **PWM**: Controllo motori (ESC)
-- **ADC**: Monitoraggio batteria
-
 ## 🚀 Installazione
 
 ### Prerequisiti
@@ -367,8 +348,6 @@ Questo progetto è distribuito sotto licenza **MIT**. Vedi il file [LICENSE](LIC
 Per domande, problemi o suggerimenti:
 
 - 📧 **Email**: [vito.ammirata[at]gmail.com]
-- 💬 **Issues**: [GitHub Issues](https://github.com/tuo-username/smart-mower/issues)
-- 📖 **Wiki**: [Documentazione completa](https://github.com/tuo-username/smart-mower/wiki)
 
 ---
 
