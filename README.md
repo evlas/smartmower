@@ -362,11 +362,11 @@ Questo progetto è distribuito sotto licenza **MIT**. Vedi il file [LICENSE](LIC
 - **Raspberry Pi Foundation** per l'hardware accessibile
 - **MicroPython Team** per il firmware embedded
 
-## 📞 Supporto
+## 📞 Supportomail.com
 
 Per domande, problemi o suggerimenti:
 
-- 📧 **Email**: [tuo-email@esempio.com]
+- 📧 **Email**: [vito.ammirata[at]gmail.com]
 - 💬 **Issues**: [GitHub Issues](https://github.com/tuo-username/smart-mower/issues)
 - 📖 **Wiki**: [Documentazione completa](https://github.com/tuo-username/smart-mower/wiki)
 
