@@ -227,6 +227,34 @@ ros2 topic echo /imu/data         # Dati IMU
 ros2 topic echo /sonar/center/scan # Sensori distanza
 ```
 
+### Avvio RTAB-Map per Mappatura
+```bash
+# 1. Avvia prima il sistema base con Nav2
+ros2 launch mower_bringup bringup_pico_rtab.launch.py
+
+# 2. In un terminale separato, avvia RTAB-Map per mappatura
+ros2 launch mower_bringup rtabmap.launch.py
+
+# Verifica nodi RTAB-Map attivi
+ros2 node list | grep rtabmap
+
+# Visualizza la mappa in costruzione
+ros2 run rtabmap_viz rtabmap_viz
+```
+
+### Test RTAB-Map
+```bash
+# Test componenti RTAB-Map
+ros2 launch rtabmap_ros rtabmap.launch.py \
+  rtabmap_args:="--delete_db_on_start" \
+  rgb_topic:=/camera/image_raw \
+  camera_info_topic:=/camera/camera_info \
+  approx_sync:=false
+
+# Salva mappa RTAB-Map
+ros2 service call /rtabmap/save_map rtabmap_ros/SaveMap
+```
+
 ### Controllo Manuale
 ```bash
 # Movimento manuale
@@ -269,13 +297,6 @@ python3 ../uart_test.py
 
 # Test componenti hardware
 ros2 run mower_bringup hardware_test.py
-
-# Test RTAB-Map (quando implementata)
-ros2 launch rtabmap_ros rtabmap.launch.py \
-  rtabmap_args:="--delete_db_on_start" \
-  rgb_topic:=/camera/image_raw \
-  camera_info_topic:=/camera/camera_info \
-  approx_sync:=false
 
 # Test algoritmi copertura (quando implementata)
 ros2 run mower_coverage coverage_planner_test.py
