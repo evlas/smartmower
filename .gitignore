@@ -1,0 +1,7 @@
+mower.code-workspace
+uart_test.py
+pico_micropython_ws/firmware-old
+mower_ws/build
+mower_ws/install
+mower_ws/log
+
