@@ -165,5 +165,5 @@ def generate_launch_description():
         rpi_gpio_node,
         safety_supervisor_node,
         sm_node,
-        events_bridge_node,
+        events_bridge_node
     ])

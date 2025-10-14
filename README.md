@@ -56,13 +56,13 @@ Il robot è in grado di mappare aree di lavoro, pianificare percorsi di taglio o
 ```
 
 **Flussi di navigazione:**
-- **Camera (Raspicam)** → RTAB-Map → Navigation Controller
-- **GPS (uBlox F10N)** → Navigation Controller  
-- **IMU (da Pico)** → Navigation Controller
-- **Odometria (da Pico)** → Navigation Controller
+- **Camera (Raspicam)** → RTAB-Map → Navigation Controller (Nav2)
+- **GPS (uBlox F10N)** → Navigation Controller (Nav2)
+- **IMU (da Pico)** → Navigation Controller (Nav2)
+- **Odometria (da Pico)** → Navigation Controller (Nav2)
 
 **Flussi di controllo:**
-- **Navigation Controller** → Mower Controller → Pico (attuatori)
+- **Navigation Controller (Nav2)** → Mower Controller → Pico (attuatori)
 - **Safety Supervisor** ↔ Pico (sensori di sicurezza)
 - **Blade Manager** → Pico (controllo lame)
 
@@ -110,13 +110,16 @@ mower/
 - **Controllo lame e relay** per operazioni di taglio sicure
 - **Monitoraggio batteria** con soglie configurabili
 - **Sistema eventi** per diagnostica e sicurezza
+- **Navigazione autonoma** con Nav2 e RTAB-Map per mappatura 3D
+- **Modalità ibrida**: SLAM per mappatura e localizzazione con mappe esistenti
+- **Twist Mux intelligente** per gestione sicura dei comandi di velocità per stato
 
 ### 🚧 **In Sviluppo**
 - **Mappatura aree** con registrazione perimetri manuale
-- **RTAB-Map monoculare** per mappatura 3D con camera Raspicam
 - **Algoritmi di copertura** per ottimizzazione percorsi di taglio
-- **Navigazione autonoma** con GPS uBlox F10N
 - **Missioni di taglio complete** con gestione errori e recovery
+- **Ottimizzazioni RTAB-Map** per ambienti esterni complessi
+- **Integrazione GPS avanzata** con RTK per precisione centimetrica
 
 ## 🛠️ Requisiti Hardware
 
@@ -146,6 +149,9 @@ sudo add-apt-repository universe
 sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 sudo apt update && sudo apt install ros-jazzy-desktop
+
+# Navigazione autonoma (Nav2) e mappatura (RTAB-Map)
+sudo apt install ros-jazzy-nav2-bringup ros-jazzy-rtabmap-ros
 
 # MicroPython per Pico
 sudo apt install python3-venv
@@ -198,6 +204,18 @@ diff_drive_controller:
     # ... altri parametri
 ```
 
+### Parametri Nav2 + RTAB-Map
+```bash
+# Modalità navigazione
+export MOWER_LOCALIZATION_MODE="True"  # True: localizzazione, False: SLAM
+
+# Percorso mappa (per modalità localizzazione)
+export MOWER_MAP_FILE="/home/ubuntu/mower/mower_ws/maps/map.yaml"
+
+# Configurazione RTAB-Map
+export MOWER_RTABMAP_DB="/home/ubuntu/mower/mower_ws/maps/rtabmap.db"
+```
+
 ### Parametri Hardware
 ```bash
 # Dispositivo UART per Pico
@@ -227,6 +245,36 @@ ros2 topic echo /imu/data         # Dati IMU
 ros2 topic echo /sonar/center/scan # Sensori distanza
 ```
 
+### Avvio Nav2 + RTAB-Map (Sistema Completo)
+```bash
+# Modalità localizzazione con mappa esistente (default)
+ros2 launch mower_bringup bringup_pico_rtab.launch.py
+
+# Modalità SLAM per mappatura autonoma
+ros2 launch mower_bringup bringup_pico_rtab.launch.py localization:=False
+
+# Verifica nodi Nav2 e RTAB-Map attivi
+ros2 node list | grep -E "(nav2|rtabmap|twist_mux|stop_velocity)"
+
+# Monitoraggio navigazione
+ros2 topic echo /odom                    # Odometria
+ros2 topic echo /map                     # Mappa (se in localizzazione)
+ros2 topic echo /rtabmap/map             # Mappa RTAB-Map (se in SLAM)
+ros2 topic echo /twist_mux/select        # Selezione mux corrente
+```
+
+### RTAB-Map Standalone (Mappatura Manuale)
+```bash
+# Avvia RTAB-Map per mappatura indipendente
+ros2 launch mower_bringup rtabmap.launch.py
+
+# Visualizza la mappa in costruzione
+ros2 run rtabmap_viz rtabmap_viz
+
+# Salva mappa RTAB-Map
+ros2 service call /rtabmap/save_map rtabmap_ros/SaveMap
+```
+
 ### Controllo Manuale
 ```bash
 # Movimento manuale
@@ -246,8 +294,54 @@ ros2 run tf2_tools view_frames.py
 rviz2 -d mower.rviz
 
 # Logs del sistema
-ros2 bag record /imu/data /odom /battery /sonar/center/scan
+ros2 bag record /imu/data /odom /battery /sonar/center/scan /camera/image_raw
+
+# Debug nodi specifici
+ros2 run rqt_graph rqt_graph  # Visualizza grafo nodi
+ros2 run rqt_console rqt_console  # Monitora log
+
+# Monitoraggio Twist Mux
+ros2 topic echo /twist_mux/select     # Stato corrente selezionato
+ros2 topic echo /cmd_vel_mux         # Comando velocità finale
+ros2 topic list | grep cmd_vel       # Tutti i topic cmd_vel disponibili
 ```
+
+### Twist Mux - Gestione Sicura dei Comandi di Velocità
+
+Il sistema utilizza **Twist Mux** per garantire che solo i comandi appropriati per lo stato corrente possano controllare il robot:
+
+#### **Topic cmd_vel per Stato:**
+- `/mower/cmd_vel/undocking` - Comandi per UNDOCKING
+- `/mower/cmd_vel/mowing` - Comandi per MOWING
+- `/mower/cmd_vel/docking` - Comandi per DOCKING
+- `/mower/cmd_vel/manual` - Controllo manuale (alta priorità)
+- `/mower/cmd_vel/stop` - Velocità zero per stati di stop
+
+#### **Come Funziona:**
+1. **State Machine** pubblica lo stato corrente su `/mower/state`
+2. **TwistMuxSelector** riceve lo stato e pubblica la selezione su `/twist_mux/select`
+3. **StopVelocityPublisher** pubblica continuamente velocità zero su `/mower/cmd_vel/stop`
+4. **Twist Mux** riceve la selezione e abilita solo l'input cmd_vel corrispondente
+5. L'output va direttamente al controller: `/diff_drive_controller/cmd_vel`
+
+#### **Gestione Stati di Stop:**
+Quando il robot è in **IDLE**, **EMERGENCY_STOP**, **CHARGING**, **ERROR** o **PAUSED**:
+- Viene selezionato l'input `stop_cmd_vel` (priorità 0)
+- Il `StopVelocityPublisher` garantisce velocità zero costanti
+- **Nessun movimento** è possibile in questi stati
+
+#### **Priorità del Sistema:**
+- **MANUAL_CONTROL** (100): Massima priorità per controllo umano
+- **DOCKING** (40): Alta priorità per operazioni critiche
+- **MOWING** (30): Priorità normale per taglio
+- **UNDOCKING** (20): Priorità media per uscita
+- **IDLE/EMERGENCY_STOP/CHARGING/ERROR/PAUSED** (0): Stati di stop - nessun movimento
+
+#### **Vantaggi:**
+- ✅ **Sicurezza**: Solo comandi appropriati per stato attivo
+- ✅ **Gestione conflitti**: Priorità chiare tra stati
+- ✅ **Debug facilitato**: Topic separati per ogni stato
+- ✅ **Estensibilità**: Facile aggiungere nuovi stati
 
 ## 🔧 Sviluppo
 
@@ -269,13 +363,6 @@ python3 ../uart_test.py
 
 # Test componenti hardware
 ros2 run mower_bringup hardware_test.py
-
-# Test RTAB-Map (quando implementata)
-ros2 launch rtabmap_ros rtabmap.launch.py \
-  rtabmap_args:="--delete_db_on_start" \
-  rgb_topic:=/camera/image_raw \
-  camera_info_topic:=/camera/camera_info \
-  approx_sync:=false
 
 # Test algoritmi copertura (quando implementata)
 ros2 run mower_coverage coverage_planner_test.py
@@ -307,10 +394,12 @@ ros2 launch mower_bringup bringup_pico.launch.py
 - **cv_bridge** - Bridge OpenCV
 - **camera_info_manager** - Gestione informazioni camera
 - **hardware_interface** - Interfacce hardware ros2_control
+- **nav2_bringup** - Sistema di navigazione completo
+- **nav2_* (tutti i componenti)** - Pianificazione percorsi, controllo, costmap, etc.
+- **rtabmap_ros** - Mappatura 3D e localizzazione visuale
+- **rtabmap_* (tutti i componenti)** - SLAM monoculare, ottimizzazione, etc.
 
 ### Pacchetti Futuri Previsti
-- **rtabmap_ros** - Mappatura 3D monoculare
-- **nav2** - Navigazione autonoma
 - **mower_coverage** - Algoritmi ottimizzazione percorsi
 - **robot_localization** - Fusione sensori (EKF)
 

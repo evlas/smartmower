@@ -11,6 +11,11 @@
   <xacro:property name="ground_clearance" value="0.09"/>
   <xacro:property name="front_wheel_radius" value="0.045"/>
   <xacro:property name="front_wheel_offset" value="0.05"/>
+  <!-- mower blades (piatti di taglio) -->
+  <xacro:property name="blade_radius" value="0.11"/>
+  <xacro:property name="blade_thickness" value="0.003"/>
+  <xacro:property name="blade_offset_y" value="0.11"/>
+  <xacro:property name="blade_offset_x" value="0.0"/>
   <!-- sim toggle -->
   <xacro:property name="use_sim" value="false"/>
   <!-- ros2_control -->
@@ -575,5 +580,61 @@
     </sensor>
   </gazebo>
   </xacro:if>
+
+  <!-- Cutting Blades (two discs under chassis) [moved to end] -->
+  <joint name="blade_left_joint" type="fixed">
+    <parent link="chassis"/>
+    <!-- Place at bottom of chassis: z = -(base_height/2 + blade_thickness/2) -->
+    <child link="blade_left"/>
+    <origin xyz="${blade_offset_x} ${blade_offset_y} -${base_height/2.0 + blade_thickness/2.0}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="blade_left">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${blade_radius}" length="${blade_thickness}"/>
+      </geometry>
+      <material name="blade_mat"><color rgba="0.6 0.6 0.6 1.0"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${blade_radius}" length="${blade_thickness}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.2"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-4" iyy="1e-4" izz="1e-4" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <joint name="blade_right_joint" type="fixed">
+    <parent link="chassis"/>
+    <child link="blade_right"/>
+    <origin xyz="${blade_offset_x} -${blade_offset_y} -${base_height/2.0 + blade_thickness/2.0}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="blade_right">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${blade_radius}" length="${blade_thickness}"/>
+      </geometry>
+      <material name="blade_mat"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${blade_radius}" length="${blade_thickness}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.2"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="1e-4" iyy="1e-4" izz="1e-4" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
 
 </robot>
