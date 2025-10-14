@@ -1,0 +1,145 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="inertial_macros.xacro"/>
+
+  <!-- Robot dimensions and parameters -->
+  <xacro:property name="body_length" value="0.6"/>
+  <xacro:property name="body_width" value="0.45"/>
+  <xacro:property name="body_height" value="0.2"/>
+  <xacro:property name="ground_clearance" value="0.09"/>
+
+  <xacro:property name="wheel_radius" value="0.15"/>
+  <xacro:property name="wheel_width" value="0.06"/>
+  <xacro:property name="wheel_separation" value="0.51"/> <!-- Distance between wheel centers -->
+
+  <xacro:property name="front_wheel_radius" value="0.045"/>
+  <xacro:property name="rear_wheel_offset" value="0.05"/> <!-- Distance from rear wall to wheel center -->
+  <xacro:property name="front_wheel_offset" value="0.05"/> <!-- Distance from front wall to wheel center -->
+
+  <!-- Base link at center -->
+  <link name="base_link">
+  </link>
+
+  <!-- Chassis link -->
+  <joint name="chassis_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="chassis"/>
+    <origin xyz="0 0 ${ground_clearance + body_height/2}"/>
+  </joint>
+
+  <link name="chassis">
+    <visual>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+      <material name="chassis_material">
+        <color rgba="0.4 0.6 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+    </collision>
+    <xacro:inertial_box mass="15.0" x="${body_length}" y="${body_width}" z="${body_height}"/>
+  </link>
+
+  <!-- Left wheel link -->
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="left_wheel"/>
+    <origin xyz="-${body_length/2 - rear_wheel_offset} ${wheel_separation/2} ${wheel_radius}" rpy="-${pi/2} 0 0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <link name="left_wheel">
+    <visual>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+      <material name="wheel_material">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+    </collision>
+    <xacro:inertial_cylinder mass="2.0" length="${wheel_width}" radius="${wheel_radius}"/>
+  </link>
+
+  <!-- Right wheel link -->
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="right_wheel"/>
+    <origin xyz="-${body_length/2 - rear_wheel_offset} -${wheel_separation/2} ${wheel_radius}" rpy="${pi/2} 0 0"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+
+  <link name="right_wheel">
+    <visual>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+      <material name="wheel_material">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+      </geometry>
+    </collision>
+    <xacro:inertial_cylinder mass="2.0" length="${wheel_width}" radius="${wheel_radius}"/>
+  </link>
+
+  <!-- Front wheel link (caster wheel) -->
+  <joint name="front_wheel_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_wheel"/>
+    <origin xyz="${body_length/2 - front_wheel_offset} 0 ${front_wheel_radius}"/>
+  </joint>
+
+  <link name="front_wheel">
+    <visual>
+      <geometry>
+        <sphere radius="${front_wheel_radius}"/>
+      </geometry>
+      <material name="wheel_material">
+        <color rgba="0.3 0.3 0.3 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <sphere radius="${front_wheel_radius}"/>
+      </geometry>
+    </collision>
+    <xacro:inertial_sphere mass="0.5" radius="${front_wheel_radius}"/>
+  </link>
+
+  <!-- Gazebo Parameters -->
+  <gazebo reference="chassis">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+  <gazebo reference="right_wheel">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+  <gazebo reference="left_wheel">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+  </gazebo>
+
+  <gazebo reference="front_wheel">
+    <mu1>0.1</mu1>
+    <mu2>0.1</mu2>
+  </gazebo>
+
+</robot>
