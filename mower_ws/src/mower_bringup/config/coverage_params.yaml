@@ -1,0 +1,33 @@
+# Nav2 parameters overriding only the planner to use opennav_coverage
+# Regola lane_width = larghezza_piatto_taglio - 0.02 (metri)
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 1.0
+    planner_plugins: ["CoveragePlanner"]
+
+    CoveragePlanner:
+      plugin: "opennav_coverage::CoveragePlanner"
+      # Imposta questa larghezza in metri: es. se piatto=0.42 => 0.40
+      lane_width: 0.44
+      lane_overlap: 0.02
+      # Orientamento corsie in gradi (0 = asse X della mappa)
+      lane_angle: 0.0
+      # Se 0, usa lane_width come spaziatura
+      path_spacing: 0.0
+      turn_radius: 0.25
+      # Sorgente del perimetro: topic/map/file
+      boundary_source: "topic"
+      boundary_topic: "/coverage_boundary"
+      keepout_topic: "/coverage_keepout"
+      start_inside_only: true
+      simplify_paths: true
+      closed_boundary: true
+
+# Facoltativo: parametri minimi costmap per compatibilità (lasciare invariati se già definiti altrove)
+# local_costmap:
+#   ros__parameters:
+#     always_send_full_costmap: true
+# global_costmap:
+#   ros__parameters:
+#     always_send_full_costmap: true

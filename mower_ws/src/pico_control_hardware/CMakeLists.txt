@@ -14,6 +14,7 @@ find_package(pluginlib REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(pal_statistics REQUIRED)
 
 include_directories(
   include
@@ -38,6 +39,7 @@ ament_target_dependencies(${PROJECT_NAME}
   std_msgs
   sensor_msgs
   nav_msgs
+  pal_statistics
 )
 
 pluginlib_export_plugin_description_file(hardware_interface pico_hardware_plugin.xml)

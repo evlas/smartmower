@@ -1,0 +1,51 @@
+# Twist Mux Configuration for Smart Mower State Machine
+# Ogni stato della macchina a stati ha il suo topic cmd_vel dedicato
+# Solo il topic dello stato corrente può controllare il robot
+
+twist_mux:
+  ros__parameters:
+    use_sim_time: false
+
+    # Lista degli input cmd_vel per ogni stato
+    # Il primo nella lista ha priorità massima (se attivo)
+    # L'ordine determina la priorità in caso di conflitti
+
+    # Input per stati attivi (movimento permesso)
+    undocking_cmd_vel:
+      topic: /mower/cmd_vel/undocking
+      timeout: 0.5
+      priority: 20
+
+    mowing_cmd_vel:
+      topic: /mower/cmd_vel/mowing
+      timeout: 0.5
+      priority: 30
+
+    docking_cmd_vel:
+      topic: /mower/cmd_vel/docking
+      timeout: 0.5
+      priority: 40
+
+    # Input per stato MANUAL_CONTROL (alta priorità)
+    manual_cmd_vel:
+      topic: /mower/cmd_vel/manual
+      timeout: 0.5
+      priority: 100  # Massima priorità per controllo manuale
+
+    # Input speciale per stati di STOP (priorità minima)
+    stop_cmd_vel:
+      topic: /mower/cmd_vel/stop
+      timeout: 0.5
+      priority: 0  # Priorità minima - attivo solo quando selezionato esplicitamente
+
+    # Output principale (collegato al controller)
+    output: /diff_drive_controller/cmd_vel
+
+    # Configurazione subscriber - riceve selezione dal TwistMuxSelector
+    subscriber:
+      topic: /twist_mux/select
+      timeout: 1.0
+
+    # Configurazione publisher - per debug
+    publisher:
+      topic: /cmd_vel_mux

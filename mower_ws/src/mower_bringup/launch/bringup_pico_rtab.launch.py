@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -16,7 +17,7 @@ def generate_launch_description():
     baud = LaunchConfiguration('baud', default='115200')
     frame_id = LaunchConfiguration('frame_id', default='camera')
     map_file = LaunchConfiguration('map', default=os.path.join(os.path.expanduser('~'), 'mower', 'mower_ws', 'maps', 'map.yaml'))
-    localization = LaunchConfiguration('localization', default='true')
+    localization = LaunchConfiguration('localization', default='True')
 
     # Path diretto al launch file di pico_control_hardware (COMPLETO)
     pico_control_path = os.path.join(
@@ -47,11 +48,14 @@ def generate_launch_description():
     state_machine_yaml = os.path.join(bringup_dir, 'config', 'state_machine.yaml')
     events_bridge_yaml = os.path.join(bringup_dir, 'config', 'events_bridge.yaml')
 
+    # Twist Mux configuration
+    twist_mux_config = os.path.join(bringup_dir, 'config', 'twist_mux.yaml')
+    twist_mux_selector_script = os.path.join(bringup_dir, 'scripts', 'twist_mux_selector.py')
+
     # RTAB-Map and Nav2 paths
     rtabmap_config = os.path.join(bringup_dir, 'config', 'rtabmap.yaml')
     nav2_params = os.path.join(bringup_dir, 'config', 'nav2_params.yaml')
     nav2_bt = os.path.join(get_package_share_directory('nav2_bringup'), 'behavior_trees', 'navigate_w_replanning_and_recovery.xml')
-    nav2_config = os.path.join(get_package_share_directory('nav2_bringup'), 'params', 'nav2_params.yaml')
 
     # Camera static TF and node
     static_tf = Node(
@@ -153,10 +157,47 @@ def generate_launch_description():
         parameters=[events_bridge_yaml]
     )
 
-    # Nav2 Navigation for navigation
+    # Twist Mux per gestione cmd_vel basata sullo stato
+    twist_mux_node = Node(
+        package='twist_mux',
+        executable='twist_mux',
+        name='twist_mux',
+        output='screen',
+        parameters=[twist_mux_config],
+        remappings=[
+            ('cmd_vel_out', 'diff_drive_controller/cmd_vel'),
+        ]
+    )
+
+    # Twist Mux Selector per scegliere input basato sullo stato
+    twist_mux_selector_node = ExecuteProcess(
+        cmd=['python3', twist_mux_selector_script],
+        name='twist_mux_selector',
+        output='screen'
+    )
+
+    # Stop Velocity Publisher per garantire velocità zero negli stati di stop
+    stop_velocity_node = ExecuteProcess(
+        cmd=['python3', os.path.join(bringup_dir, 'scripts', 'stop_velocity_publisher.py')],
+        name='stop_velocity_publisher',
+        output='screen'
+    )
+
+    # RTAB-Map SLAM per mappatura e localizzazione
+    rtabmap_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(bringup_dir, 'launch', 'rtabmap.launch.py')
+        ]),
+        launch_arguments={
+            'frame_id': frame_id,
+            'map': map_file,
+        }.items()
+    )
+
+    # Nav2 con integrazione rtabmap per SLAM o localizzazione ibrida
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            os.path.join(get_package_share_directory('nav2_bringup'), 'launch', 'navigation_launch.py')
+            os.path.join(bringup_dir, 'launch', 'nav2.launch.py')
         ]),
         launch_arguments={
             'use_sim_time': use_sim_time,
@@ -164,46 +205,14 @@ def generate_launch_description():
             'autostart': 'true',
             'namespace': '',
             'use_composition': 'False',
-            'container_name': 'nav2_container',
             'use_respawn': 'False',
             'log_level': 'info',
+            # Configura modalità basata sul parametro localization
+            'slam': PythonExpression(['not ', localization]),
+            'use_localization': localization,
+            'map': map_file,
         }.items()
     )
-
-    # Map server for loading maps (required for localization)
-    map_server_node = Node(
-        package='nav2_map_server',
-        executable='map_server',
-        name='map_server',
-        output='screen',
-        parameters=[nav2_params, {'yaml_filename': ''}]
-    )
-
-    # Collision Monitor (temporarily disabled for stability)
-    # collision_monitor_node = Node(
-    #     package='nav2_collision_monitor',
-    #     executable='collision_monitor',
-    #     name='collision_monitor',
-    #     output='screen',
-    #     parameters=[nav2_params],
-    #     remappings=[
-    #         ('cmd_vel_in', 'cmd_vel_nav'),
-    #         ('cmd_vel_out', 'cmd_vel'),
-    #     ]
-    # )
-
-    # Velocity Smoother (temporarily disabled for stability)
-    # velocity_smoother_node = Node(
-    #     package='nav2_velocity_smoother',
-    #     executable='velocity_smoother',
-    #     name='velocity_smoother',
-    #     output='screen',
-    #     parameters=[nav2_params],
-    #     remappings=[
-    #         ('cmd_vel', 'cmd_vel_nav'),
-    #         ('cmd_vel_smoothed', 'cmd_vel'),
-    #     ]
-    # )
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
@@ -212,7 +221,7 @@ def generate_launch_description():
         DeclareLaunchArgument('baud', default_value='115200'),
         DeclareLaunchArgument('frame_id', default_value='camera', description='TF frame id for the images'),
         DeclareLaunchArgument('map', default_value=os.path.join(os.path.expanduser('~'), 'mower', 'mower_ws', 'maps', 'map.yaml'), description='Path to the map file in maps directory'),
-        DeclareLaunchArgument('localization', default_value='true', description='Enable localization mode'),
+        DeclareLaunchArgument('localization', default_value='True', description='Enable localization mode'),
 
         # Pico control (include robot_state_publisher + controller_manager)
         pico_control_launch,
@@ -225,15 +234,15 @@ def generate_launch_description():
         blade_manager_node,
         relay_manager_node,
         rpi_gpio_node,
-        safety_supervisor_node,
+#        safety_supervisor_node,
         sm_node,
         events_bridge_node,
 
+        twist_mux_node,
+        twist_mux_selector_node,
+        stop_velocity_node,
+
         # RTAB-Map and Nav2
-        # rtabmap_slam_node,
-        nav2_launch,
-        map_server_node,
-        # collision_monitor_node,
-        # velocity_smoother_node,
-        # amcl_node,
+        rtabmap_launch,
+#        nav2_launch,
     ])
