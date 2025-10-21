@@ -20,7 +20,7 @@
   <xacro:property name="use_sim" value="false"/>
   <!-- ros2_control -->
   <xacro:property name="port" value="/dev/ttyAMA0"/>
-  <xacro:property name="baud" value="115200"/>
+  <xacro:property name="baud" value="230400"/>
   <ros2_control name="MowerHardware" type="system">
     <hardware>
       <plugin>pico_control_hardware/PicoSystemHardware</plugin>

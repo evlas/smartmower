@@ -18,7 +18,7 @@ def generate_launch_description():
             " ",
             "port:=", LaunchConfiguration("port", default="/dev/ttyAMA0"),
             " ",
-            "baud:=", LaunchConfiguration("baud", default="115200"),
+            "baud:=", LaunchConfiguration("baud", default="230400"),
         ]),
         value_type=str
     )

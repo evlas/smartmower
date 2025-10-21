@@ -12,11 +12,11 @@ class SafetyRelay:
         self.disable()
 
     def enable(self):
-        self._relay.value(1)
+        self._relay.value(0)  # Invertito: 0 per attivare
         self._enabled = True
 
     def disable(self):
-        self._relay.value(0)
+        self._relay.value(1)  # Invertito: 1 per disattivare
         self._enabled = False
 
     def is_enabled(self) -> bool:

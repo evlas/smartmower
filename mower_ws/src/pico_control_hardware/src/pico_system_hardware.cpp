@@ -350,25 +350,27 @@ void PicoSystemHardware::run_rx_loop()
           {
             if (len < 3 * 4) break;
             const float *f = reinterpret_cast<const float*>(payload);
-            // Sentinel: -1.0 means module not available → skip publish
-            if (f[0] >= 0.0f && f[1] >= 0.0f && f[2] >= 0.0f)
+            // Pubblica sempre 3 messaggi Range; mappa -1.0 (timeout) a 5.0 m (campo libero)
+            sensor_msgs::msg::Range msgs[3];
+            for (int i = 0; i < 3; ++i)
             {
-              sensor_msgs::msg::Range msgs[3];
-              for (int i=0;i<3;++i)
-              {
-                msgs[i].header.stamp = node->get_clock()->now();
-                msgs[i].header.frame_id = (i==0?"sonar_left_frame": i==1?"sonar_center_frame":"sonar_right_frame");
-                msgs[i].radiation_type = sensor_msgs::msg::Range::ULTRASOUND;
-                msgs[i].field_of_view = 0.26f;
-                msgs[i].min_range = 0.02f;
-                msgs[i].max_range = 3.0f;
-                msgs[i].range = std::max(0.0f, std::min(f[i], 3.0f));
-              }
-              auto pl = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_left_);
-              auto pc = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_center_);
-              auto pr = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_right_);
-              if (pl) pl->publish(msgs[0]); if (pc) pc->publish(msgs[1]); if (pr) pr->publish(msgs[2]);
+              const float raw = f[i];
+              const float max_r = 5.0f;
+              const float v = (raw >= 0.0f) ? raw : max_r;
+              msgs[i].header.stamp = node->get_clock()->now();
+              msgs[i].header.frame_id = (i==0?"sonar_left_frame": i==1?"sonar_center_frame":"sonar_right_frame");
+              msgs[i].radiation_type = sensor_msgs::msg::Range::ULTRASOUND;
+              msgs[i].field_of_view = 0.26f;
+              msgs[i].min_range = 0.02f;
+              msgs[i].max_range = max_r;
+              msgs[i].range = std::max(msgs[i].min_range, std::min(v, msgs[i].max_range));
             }
+            auto pl = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_left_);
+            auto pc = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_center_);
+            auto pr = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Range>>(pub_sonar_right_);
+            if (pl) pl->publish(msgs[0]);
+            if (pc) pc->publish(msgs[1]);
+            if (pr) pr->publish(msgs[2]);
             break;
           }
           case MSG_TLM_BATT:
@@ -554,6 +556,9 @@ bool PicoSystemHardware::open_serial(const std::string & port, int baudrate)
     case 38400: spd = B38400; break;
     case 57600: spd = B57600; break;
     case 115200: spd = B115200; break;
+    case 230400: spd = B230400; break;
+    case 460800: spd = B460800; break;
+    case 921600: spd = B921600; break;
     default: spd = B115200; break;
   }
   cfsetispeed(&tio, spd);

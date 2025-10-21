@@ -53,7 +53,7 @@ private:
 
   // params
   std::string serial_port_ = "/dev/ttyAMA0";
-  int baudrate_ = 115200;
+  int baudrate_ = 230400;
   double wheel_radius_ = 0.30;      // m
   double wheel_separation_ = 0.55;  // m
   double max_wheel_speed_ = 10.0;   // rad/s (normalize command)

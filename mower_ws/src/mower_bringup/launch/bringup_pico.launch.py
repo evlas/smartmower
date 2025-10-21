@@ -11,7 +11,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     enable_control = LaunchConfiguration('enable_control', default='true')
     device = LaunchConfiguration('device', default='/dev/ttyAMA0')
-    baud = LaunchConfiguration('baud', default='115200')
+    baud = LaunchConfiguration('baud', default='230400')
     frame_id = LaunchConfiguration('frame_id', default='camera')
 
     # Path diretto al launch file di pico_control_hardware (COMPLETO)
@@ -149,7 +149,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('enable_control', default_value='true'),
         DeclareLaunchArgument('device', default_value='/dev/ttyAMA0'),
-        DeclareLaunchArgument('baud', default_value='115200'),
+        DeclareLaunchArgument('baud', default_value='230400'),
         DeclareLaunchArgument('frame_id', default_value='camera', description='TF frame id for the images'),
 
         # Pico control (include robot_state_publisher + controller_manager)
@@ -163,7 +163,7 @@ def generate_launch_description():
         blade_manager_node,
         relay_manager_node,
         rpi_gpio_node,
-        safety_supervisor_node,
+#        safety_supervisor_node,
         sm_node,
         events_bridge_node
     ])

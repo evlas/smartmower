@@ -14,7 +14,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     enable_control = LaunchConfiguration('enable_control', default='true')
     device = LaunchConfiguration('device', default='/dev/ttyAMA0')
-    baud = LaunchConfiguration('baud', default='115200')
+    baud = LaunchConfiguration('baud', default='230400')
     frame_id = LaunchConfiguration('frame_id', default='camera')
     map_file = LaunchConfiguration('map', default=os.path.join(os.path.expanduser('~'), 'mower', 'mower_ws', 'maps', 'map.yaml'))
     localization = LaunchConfiguration('localization', default='True')
@@ -218,7 +218,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('enable_control', default_value='true'),
         DeclareLaunchArgument('device', default_value='/dev/ttyAMA0'),
-        DeclareLaunchArgument('baud', default_value='115200'),
+        DeclareLaunchArgument('baud', default_value='230400'),
         DeclareLaunchArgument('frame_id', default_value='camera', description='TF frame id for the images'),
         DeclareLaunchArgument('map', default_value=os.path.join(os.path.expanduser('~'), 'mower', 'mower_ws', 'maps', 'map.yaml'), description='Path to the map file in maps directory'),
         DeclareLaunchArgument('localization', default_value='True', description='Enable localization mode'),

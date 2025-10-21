@@ -43,7 +43,7 @@ from encoder import SingleChannelEncoder
 from odometry import DiffOdometry
 
 # ---- Debug facility ----
-DEBUG_INIT = True
+DEBUG_INIT = False
 DEBUG_STATUS_RATE_MS = 1000  # Log status every 1000ms
 try:
     DEBUG_INIT = bool(getattr(cfg, 'DEBUG_INIT', True))
@@ -303,7 +303,7 @@ def _quat_to_roll_pitch_deg(qw, qx, qy, qz):
 # ---- UART configuration ----
 # UART0: TX=GP0, RX=GP1, 115200 8N1
 try:
-    uart = UART(0, baudrate=115200, bits=8, parity=None, stop=1)
+    uart = UART(0, baudrate=230400, bits=8, parity=None, stop=1)
     _dbg('[INIT] OK: UART0')
 except Exception as e:
     uart = None
@@ -841,12 +841,18 @@ while True:
         try:
             if sonar_ok:
                 dL, dC, dR = sonar.read_all()
+                # Converti valori di timeout (-1.0) al range massimo per indicare campo libero
+                # Timeout di 30ms ≈ 5m (velocità del suono 343m/s)
+                max_range = 5.0
+                if dL < 0: dL = max_range
+                if dC < 0: dC = max_range
+                if dR < 0: dR = max_range
             else:
                 dL = dC = dR = -1.0
                 # Publish sentinel telemetry when sonar is not available
                 bf = EVENT_ERR_SONAR
                 send_event(bf)
-            # pack 3x float32 (meters); use -1.0 for timeout
+            # pack 3x float32 (meters); sempre valori positivi per campo libero o ostacolo
             import ustruct
             payload = ustruct.pack('<fff', dL, dC, dR)
             frame = pack_frame(MSG_SONAR, payload, out_seq)
