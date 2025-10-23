@@ -49,7 +49,6 @@ def generate_launch_description():
     events_bridge_yaml = os.path.join(bringup_dir, 'config', 'events_bridge.yaml')
 
     # Twist Mux configuration
-    twist_mux_config = os.path.join(bringup_dir, 'config', 'twist_mux.yaml')
     twist_mux_selector_script = os.path.join(bringup_dir, 'scripts', 'twist_mux_selector.py')
 
     # RTAB-Map and Nav2 paths
@@ -157,16 +156,11 @@ def generate_launch_description():
         parameters=[events_bridge_yaml]
     )
 
-    # Twist Mux per gestione cmd_vel basata sullo stato
-    twist_mux_node = Node(
-        package='twist_mux',
-        executable='twist_mux',
-        name='twist_mux',
-        output='screen',
-        parameters=[twist_mux_config],
-        remappings=[
-            ('cmd_vel_out', 'diff_drive_controller/cmd_vel'),
-        ]
+    # Twist Mux (incluso da launch dedicato)
+    twist_mux_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(bringup_dir, 'launch', 'twist_mux.launch.py')
+        ])
     )
 
     # Twist Mux Selector per scegliere input basato sullo stato
@@ -238,7 +232,7 @@ def generate_launch_description():
         sm_node,
         events_bridge_node,
 
-        twist_mux_node,
+        twist_mux_launch,
         twist_mux_selector_node,
         stop_velocity_node,
 

@@ -8,6 +8,7 @@
 #include <rclcpp/subscription_base.hpp>
 #include <rclcpp/publisher_base.hpp>
 #include <rclcpp_lifecycle/state.hpp>
+ #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 
 #include <string>
 #include <vector>
@@ -58,6 +59,9 @@ private:
   double wheel_separation_ = 0.55;  // m
   double max_wheel_speed_ = 10.0;   // rad/s (normalize command)
   double accel_limit_ = 0.0;        // rad/s^2 (optional)
+  int ticks_per_rev_motor_ = 12;    // ticks per motor revolution
+  double gear_ratio_ = 185.0;       // motor:wheel ratio
+  double m_per_tick_ = 0.0;         // computed from wheel_radius_ and ticks_per_rev_motor_*gear_ratio_
 
   // joints: left=0, right=1
   std::vector<double> pos_{0.0, 0.0};
@@ -91,7 +95,7 @@ private:
 
   // Publishers for telemetry
   std::shared_ptr<rclcpp::PublisherBase> pub_imu_;
-  std::shared_ptr<rclcpp::PublisherBase> pub_odom_;
+  std::shared_ptr<rclcpp::PublisherBase> pub_wheel_twist_;
   std::shared_ptr<rclcpp::PublisherBase> pub_sonar_left_;
   std::shared_ptr<rclcpp::PublisherBase> pub_sonar_center_;
   std::shared_ptr<rclcpp::PublisherBase> pub_sonar_right_;

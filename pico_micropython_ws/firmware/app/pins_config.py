@@ -47,7 +47,7 @@ WHEEL_SEPARATION_M = 0.55
 ENCODER_SIGN_SOURCE = "dir"
 
 # Odometry publishing rate (Hz)
-ODOM_RATE_HZ = 100
+ODOM_RATE_HZ = 10
 
 # ===================== BLADES (lame) =====================
 # Pins per header C di riferimento
@@ -108,13 +108,13 @@ INA226_SHUNT_OHMS = 0.002   # ohm (esempio)
 INA226_MAX_CURRENT_A = 20.0 # corrente max attesa per calcolo Current_LSB
 
 # Publishing rate battery (Hz)
-BATT_RATE_HZ = 5
+BATT_RATE_HZ = 2
 
 # ===================== IMU (BNO055) =====================
 # Indirizzo BNO055 (per datasheet 0x28)
 BNO055_ADDR = 0x28
 # Frequenza pubblicazione IMU (Hz)
-IMU_RATE_HZ = 100
+IMU_RATE_HZ = 50
 
 # Tilt threshold (degrees). Se roll o pitch superano questo limite → evento tilt
 TILT_LIMIT_DEG = 30.0
@@ -122,7 +122,7 @@ TILT_LIMIT_DEG = 30.0
 # ===================== PCF8574 (ingressi) =====================
 # Expander I2C per bumper/lift/rain/aux
 PCF8574_ADDR = 0x20
-PCF_POLL_HZ = 50
+PCF_POLL_HZ = 10
 
 # Bit mapping on PCF8574 port (0..7)
 # P0 rain, P1 lift, P2 bumper left, P3 bumper right, P4..P7 AUX1..AUX4

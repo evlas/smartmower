@@ -1,0 +1,15 @@
+[Unit]
+Description=ROS2 Teleop Joy for device %I
+After=network.target
+
+[Service]
+Type=forking
+User=ubuntu
+Environment="ROS_DOMAIN_ID=0"
+ExecStart=/usr/local/bin/start_teleop_joy.sh
+PIDFile=/tmp/teleop_joy.pid
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
+

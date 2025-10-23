@@ -67,7 +67,7 @@ def generate_launch_description():
             ('rgb/image', '/camera/image_raw'),
             ('rgb/camera_info', '/camera/camera_info'),
             ('imu', '/imu/data'),
-            ('odom', '/diff_drive_controller/odom'),
+            ('odom', '/odometry/filtered'),
         ]
     )
 

@@ -3,12 +3,14 @@
 Questo documento descrive il comportamento del firmware del Raspberry Pi Pico in `firmware/main.py`, il protocollo di comunicazione, i bit di evento e i valori sentinella usati quando un componente non è inizializzato o non disponibile.
 
 ## UART e framing
-- UART0: `TX=GP0`, `RX=GP1`, 115200 8N1.
+- UART0: `TX=GP0`, `RX=GP1`, 230400 8N1.
 - Framing: COBS + CRC16-CCITT (polinomio 0x1021, init 0xFFFF).
 - Ogni frame termina con byte `0x00`.
 
 ## Messaggi pubblicati (Pico → Host)
-- `MSG_ODOM (0x02)`: 6 x float32 LE → `x, y, theta, vx, vy, vtheta`
+- `MSG_ODOM (0x02)`: `<iif>` LE → `Δticks_left:int32, Δticks_right:int32, dt:float32(s)`
+  - I conteggi `Δticks` sono con segno (verso da pin DIR e inversioni da config).
+  - Il nodo host calcola `vx` e `vth` usando `wheel_radius`, `wheel_separation`, `ticks_per_rev_motor * gear_ratio`.
 - `MSG_SONAR (0x03)`: 3 x float32 LE → `left_m, center_m, right_m`
 - `MSG_IMU (0x01)`: 10 x float32 LE → `qw, qx, qy, qz, ax, ay, az, gx, gy, gz`
 - `MSG_BATT (0x04)`: 2 x float32 LE → `voltage_V, current_A`
@@ -16,7 +18,7 @@ Questo documento descrive il comportamento del firmware del Raspberry Pi Pico in
 - `MSG_EVENT (0x05)`: 16-bit LE bitfield di eventi/stato/errore
 
 I rate di pubblicazione sono configurati in `pins_config.py`:
-- `ODOM_RATE_HZ`, `SONAR_RATE_HZ`, `IMU_RATE_HZ`, `BATT_RATE_HZ`, più il calcolo RPM lame.
+- `ODOM_RATE_HZ` (attuale 10 Hz), `SONAR_RATE_HZ`, `IMU_RATE_HZ`, `BATT_RATE_HZ`, più il calcolo RPM lame.
 
 ## Messaggi di comando (Host → Pico)
 - `MSG_CMD_DRIVE (0x10)`: 2 x float32 LE → `left, right` in [-1..1]
@@ -35,21 +37,20 @@ Bit definiti in `main.py` (sorgente di verità):
   - `EVENT_AUX1`            = 1<<5
   - `EVENT_AUX2`            = 1<<6
   - `EVENT_AUX3`            = 1<<7
-  - `EVENT_PERIMETER_LEFT`  = 1<<8
-  - `EVENT_PERIMETER_RIGHT` = 1<<9
-  - `EVENT_TILT`            = 1<<11  (AUX4 mappato a TILT)
+  - `EVENT_AUX4`            = 1<<8
+  - `EVENT_PERIMETER_LEFT`  = 1<<9
+  - `EVENT_PERIMETER_RIGHT` = 1<<10
+  - `EVENT_TILT`            = 1<<11
 - Errori/diagnostica
-  - `EVENT_ERR_PCF`   = 1<<10
-  - `EVENT_ERR_IMU`   = 1<<12
-  - `EVENT_ERR_BATT`  = 1<<13
-  - `EVENT_ERR_SONAR` = 1<<14
-  - `EVENT_ERR_ODOM`  = 1<<15
+  - `EVENT_ERR_PCF`   = 1<<12
+  - `EVENT_ERR_IMU`   = 1<<13
+  - `EVENT_ERR_BATT`  = 1<<14
+  - `EVENT_ERR_SONAR` = 1<<15
 
 All'avvio, il firmware invia un `MSG_EVENT` con la maschera errori per segnalare quali moduli non sono disponibili. Nota: non è previsto un bit HEARTBEAT dedicato.
 
 ## Valori sentinella quando un modulo non è disponibile
 Quando un componente non è inizializzato o non disponibile, il firmware continua a pubblicare telemetria usando valori sentinella per indicare la condizione d'errore:
-- `ODOM` → `x, y, theta, vx, vy, vtheta = NaN`
 - `SONAR` → `left, center, right = -1.0`
 - `IMU` → tutti i 10 campi `NaN`
 - `BATT` → `voltage_V = -1.0`, `current_A = 0.0`
@@ -76,8 +77,8 @@ Il firmware dipende da moduli in `firmware/app/`:
 - Usare i valori sentinella per distinguere tra "dato valido" e "modulo non disponibile" lato host.
 
 ## Compatibilità
-- Il comportamento è retro-compatibile con il protocollo esistente: i payload non cambiano formato; solo i valori possono essere sentinelle.
-- Gli eventi includono nuovi bit: gli host che non li decodificano possono comunque leggere la maschera grezza.
+- Il payload di `MSG_ODOM` è stato aggiornato da 6×float32 a `<iif>`. Aggiornare i parser host di conseguenza.
+- Gli eventi includono bit di errore: gli host che non li decodificano possono comunque leggere la maschera grezza.
 
 ## Esempi lato host (D1 Mini)
 - Stampare la maschera eventi grezza: `EVENT RAW=0xXXXX`.

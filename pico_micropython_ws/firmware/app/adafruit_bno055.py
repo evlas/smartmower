@@ -205,3 +205,61 @@ class BNO055_I2C:
             return (x, y, z)
         except Exception:
             return None
+
+    # ---- Optimized combined read: quaternion (WXYZ), acceleration (m/s^2), gyro (rad/s) ----
+    # Returns tuple (qw, qx, qy, qz, ax, ay, az, gx, gy, gz) or None on failure
+    def read(self):
+        try:
+            # Try single burst from 0x08..0x27 (accel+mag+gyro+euler+quat) = 32 bytes
+            raw = self._rdn(BNO055_ACCEL_DATA_X_LSB, 0x20)
+            if not raw or len(raw) != 32:
+                raise Exception('burst32 failed')
+
+            def s16(lo, hi):
+                v = ((hi << 8) | lo) & 0xFFFF
+                return v - 65536 if v > 32767 else v
+
+            # accel @0x08..0x0D (scale 1/100 m/s^2)
+            ax = s16(raw[0], raw[1]) / 100.0
+            ay = s16(raw[2], raw[3]) / 100.0
+            az = s16(raw[4], raw[5]) / 100.0
+
+            # gyro @0x14..0x19 within this block: offset 0x14-0x08 = 0x0C
+            gx_dps = s16(raw[12], raw[13]) / 900.0
+            gy_dps = s16(raw[14], raw[15]) / 900.0
+            gz_dps = s16(raw[16], raw[17]) / 900.0
+            # convert dps to rad/s
+            import math
+            gx = gx_dps * (math.pi / 180.0)
+            gy = gy_dps * (math.pi / 180.0)
+            gz = gz_dps * (math.pi / 180.0)
+
+            # quaternion @0x20..0x27 within this block: offset 0x20-0x08 = 0x18
+            w_raw = s16(raw[24], raw[25])
+            x_raw = s16(raw[26], raw[27])
+            y_raw = s16(raw[28], raw[29])
+            z_raw = s16(raw[30], raw[31])
+            scale = 1.0 / (1 << 14)
+            qw = w_raw * scale
+            qx = x_raw * scale
+            qy = y_raw * scale
+            qz = z_raw * scale
+
+            return (float(qw), float(qx), float(qy), float(qz), float(ax), float(ay), float(az), float(gx), float(gy), float(gz))
+        except Exception:
+            # Fallback: minimal separate reads (still few transactions)
+            try:
+                q = self.quaternion
+                a = self.acceleration
+                g = self.gyro
+                if (q is None) or (a is None) or (g is None):
+                    return None
+                # quaternion property returns (x,y,z,w) → reorder to (w,x,y,z)
+                qx_, qy_, qz_, qw_ = q[0], q[1], q[2], q[3]
+                import math
+                gx = float(g[0]) * (math.pi/180.0)
+                gy = float(g[1]) * (math.pi/180.0)
+                gz = float(g[2]) * (math.pi/180.0)
+                return (float(qw_), float(qx_), float(qy_), float(qz_), float(a[0]), float(a[1]), float(a[2]), gx, gy, gz)
+            except Exception:
+                return None

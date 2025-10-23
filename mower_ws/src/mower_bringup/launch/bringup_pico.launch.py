@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
+from launch_ros.actions import Node
 import os
 
 def generate_launch_description():
@@ -43,7 +44,8 @@ def generate_launch_description():
     state_machine_yaml = os.path.join(bringup_dir, 'config', 'state_machine.yaml')
     events_bridge_yaml = os.path.join(bringup_dir, 'config', 'events_bridge.yaml')
 
-    from launch_ros.actions import Node
+    # Twist Mux configuration
+    twist_mux_selector_script = os.path.join(bringup_dir, 'scripts', 'twist_mux_selector.py')
 
     # Camera static TF and node
     static_tf = Node(
@@ -145,6 +147,27 @@ def generate_launch_description():
         parameters=[events_bridge_yaml]
     )
 
+    # Twist Mux (incluso da launch dedicato)
+    twist_mux_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(bringup_dir, 'launch', 'twist_mux.launch.py')
+        ])
+    )
+
+    # Twist Mux Selector per scegliere input basato sullo stato
+    twist_mux_selector_node = ExecuteProcess(
+        cmd=['python3', twist_mux_selector_script],
+        name='twist_mux_selector',
+        output='screen'
+    )
+
+    # Stop Velocity Publisher per garantire velocità zero negli stati di stop
+    stop_velocity_node = ExecuteProcess(
+        cmd=['python3', os.path.join(bringup_dir, 'scripts', 'stop_velocity_publisher.py')],
+        name='stop_velocity_publisher',
+        output='screen'
+    )
+
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('enable_control', default_value='true'),
@@ -157,7 +180,7 @@ def generate_launch_description():
 
         # Altri nodi del mower
         static_tf,
-        camera_node,
+#        camera_node,
         ublox_node,
         battery_manager_node,
         blade_manager_node,
@@ -165,5 +188,9 @@ def generate_launch_description():
         rpi_gpio_node,
 #        safety_supervisor_node,
         sm_node,
-        events_bridge_node
+        events_bridge_node,
+
+        twist_mux_launch,
+        twist_mux_selector_node,
+        stop_velocity_node,
     ])

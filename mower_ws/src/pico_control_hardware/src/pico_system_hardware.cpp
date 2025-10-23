@@ -55,6 +55,15 @@ hardware_interface::CallbackReturn PicoSystemHardware::on_init(
     max_wheel_speed_ = std::stod(hp.at("max_wheel_speed"));
   if (hp.count("accel_limit"))
     accel_limit_ = std::stod(hp.at("accel_limit"));
+  if (hp.count("ticks_per_rev_motor"))
+    ticks_per_rev_motor_ = std::stoi(hp.at("ticks_per_rev_motor"));
+  if (hp.count("gear_ratio"))
+    gear_ratio_ = std::stod(hp.at("gear_ratio"));
+  if (ticks_per_rev_motor_ <= 0 || gear_ratio_ <= 0.0) {
+    m_per_tick_ = 0.0;
+  } else {
+    m_per_tick_ = (2.0 * M_PI * wheel_radius_) / (static_cast<double>(ticks_per_rev_motor_) * gear_ratio_);
+  }
 
   // Expect exactly 2 joints (left, right)
   if (info_.joints.size() != 2)
@@ -116,6 +125,15 @@ hardware_interface::CallbackReturn PicoSystemHardware::on_init(const hardware_in
     max_wheel_speed_ = std::stod(info_.hardware_parameters.at("max_wheel_speed"));
   if (info_.hardware_parameters.count("accel_limit"))
     accel_limit_ = std::stod(info_.hardware_parameters.at("accel_limit"));
+  if (info_.hardware_parameters.count("ticks_per_rev_motor"))
+    ticks_per_rev_motor_ = std::stoi(info_.hardware_parameters.at("ticks_per_rev_motor"));
+  if (info_.hardware_parameters.count("gear_ratio"))
+    gear_ratio_ = std::stod(info_.hardware_parameters.at("gear_ratio"));
+  if (ticks_per_rev_motor_ <= 0 || gear_ratio_ <= 0.0) {
+    m_per_tick_ = 0.0;
+  } else {
+    m_per_tick_ = (2.0 * M_PI * wheel_radius_) / (static_cast<double>(ticks_per_rev_motor_) * gear_ratio_);
+  }
 
   // Expect exactly 2 joints (left, right)
   if (info_.joints.size() != 2)
@@ -170,7 +188,7 @@ hardware_interface::CallbackReturn PicoSystemHardware::on_activate(const rclcpp_
   {
     // Publishers (created on first activate)
     if (!pub_imu_)          pub_imu_ = node->create_publisher<sensor_msgs::msg::Imu>("/imu/data", 10);
-    if (!pub_odom_)         pub_odom_ = node->create_publisher<nav_msgs::msg::Odometry>("/odom", 10);
+    if (!pub_wheel_twist_)  pub_wheel_twist_ = node->create_publisher<geometry_msgs::msg::TwistWithCovarianceStamped>("/wheel_odom/twist", 10);
     if (!pub_sonar_left_)   pub_sonar_left_ = node->create_publisher<sensor_msgs::msg::Range>("/sonar/left/scan", 10);
     if (!pub_sonar_center_) pub_sonar_center_ = node->create_publisher<sensor_msgs::msg::Range>("/sonar/center/scan", 10);
     if (!pub_sonar_right_)  pub_sonar_right_ = node->create_publisher<sensor_msgs::msg::Range>("/sonar/right/scan", 10);
@@ -301,49 +319,86 @@ void PicoSystemHardware::run_rx_loop()
         if (crc_calc != crc_rx) continue;
 
         const uint8_t *payload = decoded.data() + payload_offset;
+        const uint8_t seq = decoded[2];
+        const uint32_t ts_ms = static_cast<uint32_t>(decoded[3]) |
+                               (static_cast<uint32_t>(decoded[4])<<8) |
+                               (static_cast<uint32_t>(decoded[5])<<16) |
+                               (static_cast<uint32_t>(decoded[6])<<24);
 
         switch (msg_id)
         {
           case MSG_TLM_IMU:
           {
             if (len < 10 * 4) break;
-            sensor_msgs::msg::Imu msg;
-            msg.header.stamp = node->get_clock()->now();
-            msg.header.frame_id = "imu_link";
             const float *f = reinterpret_cast<const float*>(payload);
-            // Sentinel: NaN means module not available
-            bool invalid = false;
-            for (int i=0;i<10;++i) { if (std::isnan(f[i])) { invalid = true; break; } }
-            if (!invalid)
+            bool ori_valid = !(std::isnan(f[0]) || std::isnan(f[1]) || std::isnan(f[2]) || std::isnan(f[3]));
+            // Log throttled every 5 seconds for debugging
+            static auto last_log = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - last_log).count() >= 5) {
+              RCLCPP_INFO(rclcpp::get_logger("PicoSystemHardware"),
+                "IMU frame: len=%d ts_ms=%u ori_valid=%d f[0]=%.3f f[1]=%.3f f[2]=%.3f f[3]=%.3f f[4]=%.3f f[5]=%.3f f[6]=%.3f f[7]=%.3f f[8]=%.3f f[9]=%.3f",
+                len, ts_ms, ori_valid, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]);
+              last_log = now;
+            }
+            sensor_msgs::msg::Imu msg;
+            msg.header.stamp = rclcpp::Time(ts_ms * 1000000ULL);
+            msg.header.frame_id = "imu_link";
+            if (ori_valid)
             {
               msg.orientation.w = f[0]; msg.orientation.x = f[1]; msg.orientation.y = f[2]; msg.orientation.z = f[3];
-              msg.linear_acceleration.x = f[4]; msg.linear_acceleration.y = f[5]; msg.linear_acceleration.z = f[6];
-              msg.angular_velocity.x = f[7]; msg.angular_velocity.y = f[8]; msg.angular_velocity.z = f[9];
-              auto pub = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Imu>>(pub_imu_);
-              if (pub) pub->publish(msg);
+              for (int i=0;i<9;++i) msg.orientation_covariance[i] = 0.0;
+              msg.orientation_covariance[0]=0.02; msg.orientation_covariance[4]=0.02; msg.orientation_covariance[8]=0.05;
             }
+            else
+            {
+              msg.orientation.w = 1.0; msg.orientation.x = 0.0; msg.orientation.y = 0.0; msg.orientation.z = 0.0;
+              msg.orientation_covariance[0] = -1.0; msg.orientation_covariance[1]=0; msg.orientation_covariance[2]=0;
+              msg.orientation_covariance[3] = 0;    msg.orientation_covariance[4] = 0;  msg.orientation_covariance[5]=0;
+              msg.orientation_covariance[6] = 0;    msg.orientation_covariance[7] = 0;  msg.orientation_covariance[8]=0;
+            }
+            msg.linear_acceleration.x = std::isnan(f[4]) ? 0.0 : f[4];
+            msg.linear_acceleration.y = std::isnan(f[5]) ? 0.0 : f[5];
+            msg.linear_acceleration.z = std::isnan(f[6]) ? 0.0 : f[6];
+            msg.angular_velocity.x = std::isnan(f[7]) ? 0.0 : f[7];
+            msg.angular_velocity.y = std::isnan(f[8]) ? 0.0 : f[8];
+            msg.angular_velocity.z = std::isnan(f[9]) ? 0.0 : f[9];
+            for (int i=0;i<9;++i) msg.angular_velocity_covariance[i] = 0.0;
+            msg.angular_velocity_covariance[0]=0.01; msg.angular_velocity_covariance[4]=0.01; msg.angular_velocity_covariance[8]=0.02;
+            for (int i=0;i<9;++i) msg.linear_acceleration_covariance[i] = 0.0;
+            msg.linear_acceleration_covariance[0]=0.1; msg.linear_acceleration_covariance[4]=0.1; msg.linear_acceleration_covariance[8]=0.2;
+            auto pub = std::static_pointer_cast<rclcpp::Publisher<sensor_msgs::msg::Imu>>(pub_imu_);
+            if (pub) pub->publish(msg);
             break;
           }
           case MSG_TLM_ODOM:
           {
-            if (len < 6 * 4) break;
-            const float *f = reinterpret_cast<const float*>(payload);
-            bool invalid = false;
-            for (int i=0;i<6;++i) { if (std::isnan(f[i])) { invalid = true; break; } }
-            if (!invalid)
-            {
-              nav_msgs::msg::Odometry od;
-              od.header.stamp = node->get_clock()->now();
-              od.header.frame_id = odom_frame;
-              od.child_frame_id = base_frame;
-              double x=f[0], y=f[1], th=f[2];
-              od.pose.pose.position.x = x; od.pose.pose.position.y = y; od.pose.pose.position.z = 0.0;
-              double cy = std::cos(th*0.5), sy = std::sin(th*0.5);
-              od.pose.pose.orientation.w = cy; od.pose.pose.orientation.x = 0; od.pose.pose.orientation.y = 0; od.pose.pose.orientation.z = sy;
-              od.twist.twist.linear.x = f[3]; od.twist.twist.linear.y = f[4]; od.twist.twist.angular.z = f[5];
-              auto pub = std::static_pointer_cast<rclcpp::Publisher<nav_msgs::msg::Odometry>>(pub_odom_);
-              if (pub) pub->publish(od);
-            }
+            // New payload: <iif> => int32 dl, int32 dr, float dt (seconds)
+            if (len < 4 + 4 + 4) break;
+            int32_t dl_ticks = 0;
+            int32_t dr_ticks = 0;
+            float dt = 0.0f;
+            std::memcpy(&dl_ticks, payload + 0, 4);
+            std::memcpy(&dr_ticks, payload + 4, 4);
+            std::memcpy(&dt,       payload + 8, 4);
+            if (dt <= 0.0f || m_per_tick_ <= 0.0) break;
+            const double dL = static_cast<double>(dl_ticks) * m_per_tick_;
+            const double dR = static_cast<double>(dr_ticks) * m_per_tick_;
+            const double v  = (dL + dR) * 0.5 / static_cast<double>(dt);
+            const double vth = (dR - dL) / wheel_separation_ / static_cast<double>(dt);
+            geometry_msgs::msg::TwistWithCovarianceStamped tw;
+            tw.header.stamp = node->get_clock()->now();
+            tw.header.frame_id = base_frame;
+            tw.twist.twist.linear.x = v;
+            tw.twist.twist.linear.y = 0.0;
+            tw.twist.twist.angular.z = vth;
+            // Basic covariances (tune in config): low vy, moderate vth
+            tw.twist.covariance.fill(0.0);
+            tw.twist.covariance[0] = 0.02;   // vx var
+            tw.twist.covariance[7] = 0.10;   // vy var (unused)
+            tw.twist.covariance[35]= 0.05;   // vth var
+            auto pub = std::static_pointer_cast<rclcpp::Publisher<geometry_msgs::msg::TwistWithCovarianceStamped>>(pub_wheel_twist_);
+            if (pub) pub->publish(tw);
             break;
           }
           case MSG_TLM_SONAR:

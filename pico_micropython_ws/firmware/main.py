@@ -40,7 +40,6 @@ from protocol import (
     MSG_IMU,
 )
 from encoder import SingleChannelEncoder
-from odometry import DiffOdometry
 
 # ---- Debug facility ----
 DEBUG_INIT = False
@@ -404,16 +403,49 @@ IMU_PERIOD_MS = int(1000 // max(1, int(getattr(cfg, 'IMU_RATE_HZ', 100))))
 last_imu_ms = time.ticks_ms()
 try:
     _dbg('[INIT] Initializing BNO055...')
-    _dbg(f'[INIT] I2C scan: {_i2c.scan()}')
-    imu = BNO055_I2C(_i2c, address=getattr(cfg, 'BNO055_ADDR', 0x28))
-    
-    if imu.ok():
-        _dbg('[INIT] BNO055 initialized successfully')
+    scan_list = []
+    try:
+        scan_list = _i2c.scan()
+        _dbg(f'[INIT] I2C scan: {scan_list}')
+    except Exception:
+        _dbg('[INIT] WARN: I2C scan failed')
+
+    # Try multiple candidate addresses with retries
+    candidates = []
+    try:
+        candidates.append(int(getattr(cfg, 'BNO055_ADDR', 0x28)))
+    except Exception:
+        candidates.append(0x28)
+    for a in (0x28, 0x29):
+        if a not in candidates:
+            candidates.append(a)
+
+    imu = None
+    for addr in candidates:
+        _dbg(f'[INIT] Trying BNO055 at 0x{addr:02X}')
+        for attempt in range(5):
+            try:
+                tmp = BNO055_I2C(_i2c, address=addr)
+                time.sleep_ms(50)
+                if tmp and hasattr(tmp, 'ok') and tmp.ok():
+                    imu = tmp
+                    _dbg(f'[INIT] BNO055 OK at 0x{addr:02X} (attempt {attempt+1})')
+                    break
+            except Exception:
+                pass
+            time.sleep_ms(100)
+        if imu is not None:
+            break
+
+    if imu is not None:
         # Test read to verify communication: prefer Euler first, then full read
         _dbg('[INIT] Testing BNO055 communication...')
         euler = None
         for _try in range(5):
-            euler = imu.read_euler() if hasattr(imu, 'read_euler') else None
+            try:
+                euler = imu.read_euler() if hasattr(imu, 'read_euler') else None
+            except Exception:
+                euler = None
             if euler is not None:
                 break
             time.sleep_ms(100)
@@ -423,7 +455,10 @@ try:
         else:
             test_data = None
             for _try in range(5):
-                test_data = imu.read()
+                try:
+                    test_data = imu.read()
+                except Exception:
+                    test_data = None
                 if test_data is not None:
                     break
                 time.sleep_ms(100)
@@ -432,11 +467,10 @@ try:
             else:
                 _dbg('[INIT] WARN: BNO055 test read failed (no data)')
     else:
-        _dbg('[INIT] ERR: BNO055 initialization failed')
-        imu = None
+        _dbg('[INIT] ERR: BNO055 initialization failed at all candidate addresses')
 except Exception as e:
     imu = None
-    _dbg(f'[INIT] ERR: BNO055 initialization failed: {e}')
+    _dbg(f'[INIT] ERR: BNO055 initialization exception: {e}')
     import sys
     sys.print_exception(e)
 
@@ -468,24 +502,27 @@ def send_event(bitfield: int):
         led.on()
     last_uart_activity_ms = time.ticks_ms()
 
-# Event bits for AUX sensors from PCF8574 (draft)
 EVENT_RELAY_ENABLED = 1 << 0
 EVENT_BUMPER_LEFT   = 1 << 1
 EVENT_BUMPER_RIGHT  = 1 << 2
 EVENT_LIFT          = 1 << 3
 EVENT_RAIN          = 1 << 4
-# AUX from PCF8574 (bits 5-8 in bitfield)
+# AUX generici da PCF8574: bit 5..7
 EVENT_AUX1 = 1 << 5
 EVENT_AUX2 = 1 << 6
 EVENT_AUX3 = 1 << 7
-EVENT_TILT = 1 << 11  # AUX4 mapped to TILT (bit 11)
+EVENT_AUX4 = 1 << 8
+# Sensori perimetrali: bit 8..9
+EVENT_PERIMETER_LEFT  = 1 << 9
+EVENT_PERIMETER_RIGHT = 1 << 10
+# TILT
+EVENT_TILT = 1 << 11
 
 # Error/diagnostics bits
-EVENT_ERR_PCF    = 1 << 10  # Bit 10 for PCF error
-EVENT_ERR_IMU    = 1 << 12
-EVENT_ERR_BATT   = 1 << 13
-EVENT_ERR_SONAR  = 1 << 14
-EVENT_ERR_ODOM   = 1 << 15
+EVENT_ERR_PCF    = 1 << 12  # PCF error
+EVENT_ERR_IMU    = 1 << 13
+EVENT_ERR_BATT   = 1 << 14
+EVENT_ERR_SONAR  = 1 << 15
 
 
 # Track last states to emit events on change
@@ -559,17 +596,6 @@ except Exception as e:
     enc_right = None
     _dbg('[INIT] ERR: Encoders: {}'.format(e))
 
-try:
-    odom = DiffOdometry(
-        ticks_per_rev_motor=cfg.TICKS_PER_REV_MOTOR,
-        gear_ratio=cfg.GEAR_RATIO,
-        wheel_radius_m=cfg.WHEEL_RADIUS_M,
-        wheel_separation_m=cfg.WHEEL_SEPARATION_M,
-    )
-    _dbg('[INIT] OK: DiffOdometry')
-except Exception as e:
-    odom = None
-    _dbg('[INIT] ERR: DiffOdometry: {}'.format(e))
 
 # Blade encoders (for RPM)
 blade_enc1 = SingleChannelEncoder(cfg.BLADE1_ENC_PIN, debounce_us=150)
@@ -607,7 +633,7 @@ except Exception:
 
 sonar_ok = (sonar is not None)
 
-odom_ok = (odom is not None) and (enc_left is not None) and (enc_right is not None)
+encoders_ok = (enc_left is not None) and (enc_right is not None)
 
 pcf_ok = (pcf is not None)
 
@@ -619,8 +645,6 @@ if not batt_ok:
     initial_err |= EVENT_ERR_BATT
 if not sonar_ok:
     initial_err |= EVENT_ERR_SONAR
-if not odom_ok:
-    initial_err |= EVENT_ERR_ODOM
 if not pcf_ok:
     initial_err |= EVENT_ERR_PCF
 if initial_err:
@@ -658,6 +682,68 @@ while True:
     now = time.ticks_ms()
     if time.ticks_diff(now, last_drive_cmd_ms) > DRIVE_CMD_TIMEOUT_MS:
         safety.disable()
+
+    # IMU telemetry publish loop @ cfg.IMU_RATE_HZ (moved early in the loop)
+    if time.ticks_diff(now, last_imu_ms) >= IMU_PERIOD_MS:
+        last_imu_ms = now
+        try:
+            import ustruct
+            nan = float('nan')
+            qw = qx = qy = qz = ax = ay = az = gx = gy = gz = nan
+            got_any = False
+            if imu is not None:
+                # 1) Tentativo rapido: lettura completa (quat+acc+gyro)
+                try:
+                    data = imu.read()
+                    if (data is not None) and (len(data) >= 10):
+                        qw, qx, qy, qz, ax, ay, az, gx, gy, gz = data[0:10]
+                        got_any = True
+                except Exception:
+                    pass
+                # 2) Fallback: costruisci dai singoli attributi/proprietà
+                if not got_any:
+                    # quaternion può essere (qx,qy,qz,qw) in alcune lib: riordina a (w,x,y,z)
+                    try:
+                        q = imu.quaternion if hasattr(imu, 'quaternion') else None
+                        if q is not None and len(q) >= 4:
+                            # molte implementazioni Adafruit: (qx,qy,qz,qw)
+                            qx_, qy_, qz_, qw_ = q[0], q[1], q[2], q[3]
+                            qw, qx, qy, qz = float(qw_), float(qx_), float(qy_), float(qz_)
+                            got_any = True
+                    except Exception:
+                        pass
+                    try:
+                        acc = imu.acceleration if hasattr(imu, 'acceleration') else None
+                        if acc is not None and len(acc) >= 3:
+                            ax, ay, az = float(acc[0]), float(acc[1]), float(acc[2])
+                            got_any = True
+                    except Exception:
+                        pass
+                    try:
+                        gr = imu.gyro if hasattr(imu, 'gyro') else None
+                        if gr is not None and len(gr) >= 3:
+                            # Molte lib riportano °/s → converti in rad/s
+                            import math
+                            gx, gy, gz = [float(v) * (math.pi/180.0) for v in (gr[0], gr[1], gr[2])]
+                            got_any = True
+                    except Exception:
+                        pass
+            # Se niente letto, notifica errore
+            if not got_any:
+                try:
+                    send_event(EVENT_ERR_IMU)
+                except Exception:
+                    pass
+            payload = ustruct.pack('<ffffffffff', float(qw), float(qx), float(qy), float(qz), float(ax), float(ay), float(az), float(gx), float(gy), float(gz))
+            frame = pack_frame(MSG_IMU, payload, out_seq)
+            out_seq = (out_seq + 1) & 0xFF
+            uart.write(frame)
+            if led is not None:
+                led.on()
+            last_uart_activity_ms = time.ticks_ms()
+        except Exception:
+            # never let IMU errors break main loop
+            pass
 
     # Periodic motor update
     if time.ticks_diff(now, last_update_ms) >= UPDATE_PERIOD_MS:
@@ -729,7 +815,7 @@ while True:
             if aux3:
                 bf |= EVENT_AUX3
             if aux4:
-                bf |= EVENT_TILT
+                bf |= EVENT_AUX4
 
             # Detect if any change occurred vs last snapshot
             changed = (
@@ -760,7 +846,7 @@ while True:
         last_odom_ms = now
 
         # Read ticks from encoders (if available)
-        if odom_ok:
+        if encoders_ok:
             tL = enc_left.read_and_reset()
             tR = enc_right.read_and_reset()
         else:
@@ -788,19 +874,8 @@ while True:
 
         # Update odometry and publish
         try:
-            import ustruct, math
-            if odom_ok:
-                odom.update(tL, tR, dt)
-                x, y, th, vx, vy, vth = odom.state()
-            else:
-                # Use NaN sentinels when odom is not available
-                nan = float('nan')
-                x = y = th = vx = vy = vth = nan
-                # Publish sentinel telemetry when odom is not available
-                bf = EVENT_ERR_ODOM
-                send_event(bf)
-            # Pack 6×float32 little-endian
-            payload = ustruct.pack('<ffffff', x, y, th, vx, vy, vth)
+            import ustruct
+            payload = ustruct.pack('<iif', int(tL), int(tR), float(dt))
             frame = pack_frame(MSG_ODOM, payload, out_seq)
             out_seq = (out_seq + 1) & 0xFF
             uart.write(frame)
@@ -903,5 +978,5 @@ while True:
             led.off()
             uart_connected = False
 
-    # Small sleep to yield
-    time.sleep_ms(1)
+    # Small sleep to yield (non-blocking)
+    time.sleep_ms(0)

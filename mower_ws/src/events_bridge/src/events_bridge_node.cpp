@@ -22,7 +22,6 @@ public:
     err_imu_topic_      = this->declare_parameter<std::string>("err_imu_topic", "/errors/imu");
     err_batt_topic_     = this->declare_parameter<std::string>("err_batt_topic", "/errors/batt");
     err_sonar_topic_    = this->declare_parameter<std::string>("err_sonar_topic", "/errors/sonar");
-    err_odom_topic_     = this->declare_parameter<std::string>("err_odom_topic", "/errors/odom");
     err_pcf_topic_      = this->declare_parameter<std::string>("err_pcf_topic", "/errors/pcf");
     perimeter_left_topic_  = this->declare_parameter<std::string>("perimeter_left_topic", "/sensors/perimeter_left");
     perimeter_right_topic_ = this->declare_parameter<std::string>("perimeter_right_topic", "/sensors/perimeter_right");
@@ -33,20 +32,19 @@ public:
     bit_bumper_right_  = this->declare_parameter<int>("bit_bumper_right", 2);      // 1<<2
     bit_lift_          = this->declare_parameter<int>("bit_lift", 3);              // 1<<3
     bit_rain_          = this->declare_parameter<int>("bit_rain", 4);              // 1<<4
-    // AUX mapping per firmware main.py: AUX1=5, AUX2=6, AUX3=7, AUX4 mappato a TILT (bit 11)
+    // AUX mapping per firmware main.py: AUX1=5, AUX2=6, AUX3=7, AUX4=8
     bit_aux1_          = this->declare_parameter<int>("bit_aux1", 5);              // 1<<5
     bit_aux2_          = this->declare_parameter<int>("bit_aux2", 6);              // 1<<6
     bit_aux3_          = this->declare_parameter<int>("bit_aux3", 7);              // 1<<7
-    bit_aux4_          = this->declare_parameter<int>("bit_aux4", 11);             // 1<<11 (tilt)
+    bit_aux4_          = this->declare_parameter<int>("bit_aux4", 8);              // 1<<8
     bit_tilt_          = this->declare_parameter<int>("bit_tilt", 11);             // 1<<11
-    bit_perimeter_left_  = this->declare_parameter<int>("bit_perimeter_left", 8);  // 1<<8
-    bit_perimeter_right_ = this->declare_parameter<int>("bit_perimeter_right", 9); // 1<<9
-    // Error bits per main.py firmware (confermata sorgente di verità)
-    bit_err_pcf_       = this->declare_parameter<int>("bit_err_pcf", 10);          // 1<<10
-    bit_err_imu_       = this->declare_parameter<int>("bit_err_imu", 12);          // 1<<12
-    bit_err_batt_      = this->declare_parameter<int>("bit_err_batt", 13);         // 1<<13
-    bit_err_sonar_     = this->declare_parameter<int>("bit_err_sonar", 14);        // 1<<14
-    bit_err_odom_      = this->declare_parameter<int>("bit_err_odom", 15);         // 1<<15
+    bit_perimeter_left_  = this->declare_parameter<int>("bit_perimeter_left", 9);  // 1<<9
+    bit_perimeter_right_ = this->declare_parameter<int>("bit_perimeter_right", 10); // 1<<10
+    // Error bits per main.py firmware (sorgente di verità)
+    bit_err_pcf_       = this->declare_parameter<int>("bit_err_pcf", 12);          // 1<<12
+    bit_err_imu_       = this->declare_parameter<int>("bit_err_imu", 13);          // 1<<13
+    bit_err_batt_      = this->declare_parameter<int>("bit_err_batt", 14);         // 1<<14
+    bit_err_sonar_     = this->declare_parameter<int>("bit_err_sonar", 15);        // 1<<15
 
     pub_tilt_   = this->create_publisher<std_msgs::msg::Bool>(tilt_topic_, 10);
     pub_lift_   = this->create_publisher<std_msgs::msg::Bool>(lift_topic_, 10);
@@ -64,7 +62,6 @@ public:
     pub_err_imu_   = this->create_publisher<std_msgs::msg::Bool>(err_imu_topic_, 10);
     pub_err_batt_  = this->create_publisher<std_msgs::msg::Bool>(err_batt_topic_, 10);
     pub_err_sonar_ = this->create_publisher<std_msgs::msg::Bool>(err_sonar_topic_, 10);
-    pub_err_odom_  = this->create_publisher<std_msgs::msg::Bool>(err_odom_topic_, 10);
     pub_err_pcf_   = this->create_publisher<std_msgs::msg::Bool>(err_pcf_topic_, 10);
 
     sub_events_ = this->create_subscription<std_msgs::msg::UInt16>(
@@ -117,8 +114,6 @@ private:
     pub_err_batt_->publish(b);
     b.data = is_set(e, bit_err_sonar_);
     pub_err_sonar_->publish(b);
-    b.data = is_set(e, bit_err_odom_);
-    pub_err_odom_->publish(b);
     b.data = is_set(e, bit_err_pcf_);
     pub_err_pcf_->publish(b);
   }
@@ -140,7 +135,6 @@ private:
   std::string err_imu_topic_;
   std::string err_batt_topic_;
   std::string err_sonar_topic_;
-  std::string err_odom_topic_;
   std::string err_pcf_topic_;
   int bit_tilt_;
   int bit_relay_enabled_;
@@ -157,7 +151,6 @@ private:
   int bit_err_imu_;
   int bit_err_batt_;
   int bit_err_sonar_;
-  int bit_err_odom_;
   int bit_err_pcf_;
 
   // ROS
@@ -177,7 +170,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_err_imu_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_err_batt_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_err_sonar_;
-  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_err_odom_;
+  
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_err_pcf_;
 };
 

@@ -17,11 +17,13 @@ diff_drive_controller:
     wheel_radius: 0.30
     base_frame_id: base_link
     odom_frame_id: odom
-    enable_odom_tf: true
+    enable_odom_tf: false
     publish_rate: 50.0
     cmd_vel_timeout: 0.5
     use_stamped_vel: false
-
+    publish_odom: false
+    publish_odometry: true
+    
     linear:
       x:
         has_velocity_limits: true
