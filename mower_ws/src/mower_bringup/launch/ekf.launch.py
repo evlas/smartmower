@@ -11,14 +11,35 @@ def generate_launch_description():
         'ekf.yaml'
     ])
 
-    ekf_node = Node(
+    # EKF locale: odom + IMU -> odometry/local, TF odom->base_link
+    ekf_local = Node(
         package='robot_localization',
         executable='ekf_node',
-        name='ekf_filter_node',
+        name='ekf_local_node',
+        output='screen',
+        parameters=[ekf_config]
+    )
+
+    # NavSat transform: IMU + GPS + odom local -> odometry/gps
+    navsat = Node(
+        package='robot_localization',
+        executable='navsat_transform_node',
+        name='navsat_transform_node',
+        output='screen',
+        parameters=[ekf_config]
+    )
+
+    # EKF globale: odometry/local + odometry/gps -> odometry/global, TF map->odom
+    ekf_global = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_global_node',
         output='screen',
         parameters=[ekf_config]
     )
 
     return LaunchDescription([
-        ekf_node
+        ekf_local,
+        navsat,
+        ekf_global,
     ])

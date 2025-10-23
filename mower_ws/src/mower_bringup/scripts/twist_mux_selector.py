@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-import rclcpp
-from rclcpp.node import Node
+import rclpy
+from rclpy.node import Node
 from std_msgs.msg import String, Int32
 import threading
 
@@ -80,9 +80,18 @@ class TwistMuxSelector(Node):
 
         priority = self.state_priorities.get(self.current_state, 0)
 
+        # Mappa stati -> nome input esatto di twist_mux
+        state_to_input = {
+            'MANUAL_CONTROL': 'manual_cmd_vel',
+            'DOCKING': 'docking_cmd_vel',
+            'MOWING': 'mowing_cmd_vel',
+            'UNDOCKING': 'undocking_cmd_vel',
+        }
+        input_name = state_to_input.get(self.current_state, 'stop_cmd_vel')
+
         # Crea messaggio di selezione (nome dell'input twist_mux)
         select_msg = String()
-        select_msg.data = f"{self.current_state.lower()}_cmd_vel"
+        select_msg.data = input_name
         self.select_pub.publish(select_msg)
 
         # Crea messaggio di priorità
@@ -90,14 +99,14 @@ class TwistMuxSelector(Node):
         priority_msg.data = priority
         self.priority_pub.publish(priority_msg)
 
-        self.get_logger().info(f'State changed to {self.current_state}, '
-                              f'selecting {select_msg.data} with priority {priority}')
+        self.get_logger().info(f'State changed to {self.current_state}, selecting {select_msg.data} with priority {priority}')
 
 def main(args=None):
-    rclcpp.init(args=args)
+    rclpy.init(args=args)
     node = TwistMuxSelector()
-    rclcpp.spin(node)
-    rclcpp.shutdown()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

@@ -45,7 +45,7 @@ def generate_launch_description():
     events_bridge_yaml = os.path.join(bringup_dir, 'config', 'events_bridge.yaml')
 
     # Twist Mux configuration
-    twist_mux_selector_script = os.path.join(bringup_dir, 'scripts', 'twist_mux_selector.py')
+    twist_mux_selector_script = '/home/ubuntu/mower/mower_ws/src/mower_bringup/scripts/twist_mux_selector.py'
 
     # Camera static TF and node
     static_tf = Node(
@@ -163,8 +163,46 @@ def generate_launch_description():
 
     # Stop Velocity Publisher per garantire velocità zero negli stati di stop
     stop_velocity_node = ExecuteProcess(
-        cmd=['python3', os.path.join(bringup_dir, 'scripts', 'stop_velocity_publisher.py')],
+        cmd=['python3', '/home/ubuntu/mower/mower_ws/src/mower_bringup/scripts/stop_velocity_publisher.py'],
         name='stop_velocity_publisher',
+        output='screen'
+    )
+
+    # EKF (robot_localization)
+    ekf_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            '/home/ubuntu/mower/mower_ws/src/mower_bringup/launch/ekf.launch.py'
+        ])
+    )
+
+    # Teleop Twist Joy (usa joy_node esterno)
+    teleop_joy_node = Node(
+        package='teleop_twist_joy',
+        executable='teleop_node',
+        name='teleop_joy',
+        output='screen',
+        parameters=[{
+            'enable_button': 4,
+            'axis_linear.x': 1,
+            'scale_linear.x': 0.5,
+            'axis_angular.yaw': 0,
+            'scale_angular.yaw': 1.0,
+        }],
+        remappings=[
+            ('cmd_vel', '/mower/cmd_vel/manual_raw')
+        ]
+    )
+
+    # Twist stamper: /mower/cmd_vel/manual_raw (Twist) -> /mower/cmd_vel/manual (TwistStamped)
+    twist_stamper = ExecuteProcess(
+        cmd=[
+            'python3', '/home/ubuntu/mower/mower_ws/src/mower_bringup/scripts/twist_stamper.py',
+            '--ros-args',
+            '-p', 'in_topic:=/mower/cmd_vel/manual_raw',
+            '-p', 'out_topic:=/mower/cmd_vel/manual',
+            '-p', 'frame_id:=base_link'
+        ],
+        name='twist_stamper',
         output='screen'
     )
 
@@ -193,4 +231,7 @@ def generate_launch_description():
         twist_mux_launch,
         twist_mux_selector_node,
         stop_velocity_node,
+        ekf_launch,
+        teleop_joy_node,
+        twist_stamper,
     ])

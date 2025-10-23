@@ -12,6 +12,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_stamped': True,
+                'use_select': True,
                 'use_sim_time': False,
                 'topics.manual_cmd_vel.topic': '/mower/cmd_vel/manual',
                 'topics.manual_cmd_vel.timeout': 0.5,
