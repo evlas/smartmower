@@ -332,14 +332,14 @@ void PicoSystemHardware::run_rx_loop()
             if (len < 10 * 4) break;
             const float *f = reinterpret_cast<const float*>(payload);
             bool ori_valid = !(std::isnan(f[0]) || std::isnan(f[1]) || std::isnan(f[2]) || std::isnan(f[3]));
-            // Log throttled every 5 seconds for debugging
-            static auto last_log = std::chrono::steady_clock::now();
-            auto now = std::chrono::steady_clock::now();
-            if (std::chrono::duration_cast<std::chrono::seconds>(now - last_log).count() >= 5) {
-              RCLCPP_INFO(rclcpp::get_logger("PicoSystemHardware"),
-                "IMU frame: len=%d ts_ms=%u ori_valid=%d f[0]=%.3f f[1]=%.3f f[2]=%.3f f[3]=%.3f f[4]=%.3f f[5]=%.3f f[6]=%.3f f[7]=%.3f f[8]=%.3f f[9]=%.3f",
-                len, ts_ms, ori_valid, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9]);
-              last_log = now;
+            // Log solo se i dati contengono NaN
+            bool any_nan = (
+              std::isnan(f[0]) || std::isnan(f[1]) || std::isnan(f[2]) || std::isnan(f[3]) ||
+              std::isnan(f[4]) || std::isnan(f[5]) || std::isnan(f[6]) ||
+              std::isnan(f[7]) || std::isnan(f[8]) || std::isnan(f[9])
+            );
+            if (any_nan) {
+              RCLCPP_INFO(rclcpp::get_logger("PicoSystemHardware"), "IMU: NaN");
             }
             sensor_msgs::msg::Imu msg;
             msg.header.stamp = rclcpp::Time(ts_ms * 1000000ULL);

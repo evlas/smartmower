@@ -1,5 +1,6 @@
 #include "encoder.hpp"
 #include "pico/time.h"
+#include "hardware/sync.h"
 
 static SingleChannelEncoder* s_instances[30] = {nullptr};
 

@@ -2,6 +2,7 @@
 #include "hardware/uart.h"
 #include "hardware/i2c.h"
 #include "hardware/pwm.h"
+#include "hardware/clocks.h"
 #include <array>
 #include <vector>
 #include <cstring>
@@ -13,120 +14,69 @@
 #include "pcf8574.hpp"
 #include "sonar3.hpp"
 #include "ina226.hpp"
+#include "pins_config.hpp"
 
-// Pins (match MicroPython config)
-static constexpr uint UART_BAUD = 230400;
-static constexpr uint UART_ID = uart0;
-static constexpr uint UART_TX_PIN = 0; // GP0
-static constexpr uint UART_RX_PIN = 1; // GP1
+// UART settings centralizzate in pins_config.hpp
 
+// I2C instance
 static i2c_inst_t* I2C = i2c0;
-static constexpr uint I2C_SDA_PIN = 16; // GP16
-static constexpr uint I2C_SCL_PIN = 17; // GP17
-static constexpr uint I2C_BAUD = 400000;
-
-// Motor pins
-static constexpr uint MOTOR_LEFT_PWM_PIN = 8;   // GP8
-static constexpr uint MOTOR_LEFT_DIR_PIN = 12;  // GP12
-static constexpr bool LEFT_DIR_INVERTED = false;
-static constexpr uint MOTOR_RIGHT_PWM_PIN = 9;  // GP9
-static constexpr uint MOTOR_RIGHT_DIR_PIN = 13; // GP13
-static constexpr bool RIGHT_DIR_INVERTED = true;
-
-// Safety relay pin
-static constexpr uint SAFETY_RELAY_PIN = 22;    // GP22
-
-// Odometry rate (placeholder)
-static constexpr uint ODOM_RATE_HZ = 10;
-
-// Encoder pins
-static constexpr uint MOTOR_LEFT_ENC_PIN = 18;  // GP18
-static constexpr uint MOTOR_RIGHT_ENC_PIN = 19; // GP19
-
-// PCF8574 settings/bits
-static constexpr uint8_t PCF8574_ADDR = 0x20;
-static constexpr uint PCF_POLL_HZ = 10;
-static constexpr uint PCF_BIT_RAIN = 0;
-static constexpr uint PCF_BIT_LIFT = 1;
-static constexpr uint PCF_BIT_BUMPER_LEFT = 2;
-static constexpr uint PCF_BIT_BUMPER_RIGHT = 3;
-static constexpr uint PCF_BIT_AUX1 = 4;
-static constexpr uint PCF_BIT_AUX2 = 5;
-static constexpr uint PCF_BIT_AUX3 = 6;
-static constexpr uint PCF_BIT_AUX4 = 7;
-
-// Sonar pins and rate
-static constexpr uint US_FRONT_LEFT_TRIG_PIN = 2;   // GP2
-static constexpr uint US_FRONT_LEFT_ECHO_PIN = 3;   // GP3
-static constexpr uint US_FRONT_CENTER_TRIG_PIN = 4; // GP4
-static constexpr uint US_FRONT_CENTER_ECHO_PIN = 5; // GP5
-static constexpr uint US_FRONT_RIGHT_TRIG_PIN = 6;  // GP6
-static constexpr uint US_FRONT_RIGHT_ECHO_PIN = 7;  // GP7
-static constexpr uint SONAR_RATE_HZ = 10;
-static constexpr uint SONAR_TIMEOUT_US = 30000;
-
-// Battery (INA226) rate
-static constexpr uint BATT_RATE_HZ = 2;
-
-// Blades pins and params
-static constexpr uint BLADE1_PWM_PIN = 10; // GP10
-static constexpr uint BLADE1_DIR_PIN = 14; // GP14
-static constexpr uint BLADE2_PWM_PIN = 11; // GP11
-static constexpr uint BLADE2_DIR_PIN = 15; // GP15
-static constexpr uint BLADE1_ENC_PIN = 20; // GP20
-static constexpr uint BLADE2_ENC_PIN = 21; // GP21
-static constexpr uint BLADE_RPM_RATE_HZ = 10;
-static constexpr float BLADE_PULSES_PER_REV_MOTOR = 6.0f;
-static constexpr float BLADE_GEAR_RATIO = 1.0f;
 
 int main() {
     stdio_init_all();
 
-    // UART0 @230400
-    uart_init(uart0, UART_BAUD);
-    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+    // UART0 @ pinscfg::UART_BAUD
+    uart_init(uart0, pinscfg::UART_BAUD);
+    gpio_set_function(pinscfg::UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(pinscfg::UART_RX_PIN, GPIO_FUNC_UART);
     uart_set_format(uart0, 8, 1, UART_PARITY_NONE);
     uart_set_fifo_enabled(uart0, true);
 
-    // I2C0 @400k
-    i2c_init(I2C, I2C_BAUD);
-    gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
-    gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
-    gpio_pull_up(I2C_SDA_PIN);
-    gpio_pull_up(I2C_SCL_PIN);
+    gpio_init(pinscfg::LED_PIN);
+    gpio_set_dir(pinscfg::LED_PIN, GPIO_OUT);
+    gpio_put(pinscfg::LED_PIN, 0);
 
-    // Safety relay output
-    gpio_init(SAFETY_RELAY_PIN);
-    gpio_set_dir(SAFETY_RELAY_PIN, GPIO_OUT);
-    gpio_put(SAFETY_RELAY_PIN, 0); // disabled initially
+    // I2C0 @ pinscfg::I2C0_FREQ_HZ
+    i2c_init(I2C, pinscfg::I2C0_FREQ_HZ);
+    gpio_set_function(pinscfg::I2C0_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(pinscfg::I2C0_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(pinscfg::I2C0_SDA_PIN);
+    gpio_pull_up(pinscfg::I2C0_SCL_PIN);
+
+    // Safety relay output (respect active-low polarity)
+    gpio_init(pinscfg::SAFETY_RELAY_PIN);
+    gpio_set_dir(pinscfg::SAFETY_RELAY_PIN, GPIO_OUT);
+    // Disabled initially: OFF -> level = active_low ? 1 : 0
+    gpio_put(pinscfg::SAFETY_RELAY_PIN, pinscfg::RELAY_ACTIVE_LOW ? 1 : 0);
 
     // Motor DIR pins
-    gpio_init(MOTOR_LEFT_DIR_PIN);
-    gpio_set_dir(MOTOR_LEFT_DIR_PIN, GPIO_OUT);
-    gpio_put(MOTOR_LEFT_DIR_PIN, 0);
-    gpio_init(MOTOR_RIGHT_DIR_PIN);
-    gpio_set_dir(MOTOR_RIGHT_DIR_PIN, GPIO_OUT);
-    gpio_put(MOTOR_RIGHT_DIR_PIN, 0);
+    gpio_init(pinscfg::MOTOR_LEFT_DIR_PIN);
+    gpio_set_dir(pinscfg::MOTOR_LEFT_DIR_PIN, GPIO_OUT);
+    gpio_put(pinscfg::MOTOR_LEFT_DIR_PIN, 0);
+    gpio_init(pinscfg::MOTOR_RIGHT_DIR_PIN);
+    gpio_set_dir(pinscfg::MOTOR_RIGHT_DIR_PIN, GPIO_OUT);
+    gpio_put(pinscfg::MOTOR_RIGHT_DIR_PIN, 0);
 
-    // Motor PWM setup at ~20kHz
+    // Motor PWM setup using pinscfg::PWM_FREQ_HZ
     auto setup_pwm = [](uint pin){
         gpio_set_function(pin, GPIO_FUNC_PWM);
         uint slice = pwm_gpio_to_slice_num(pin);
         uint chan = pwm_gpio_to_channel(pin);
-        // 125MHz / (wrap+1) / clkdiv = freq -> wrap=6249, clkdiv=1 -> 20kHz
-        pwm_set_wrap(slice, 6249);
-        pwm_set_clkdiv(slice, 1.0f);
+        // f_sys / (wrap+1) / clkdiv = PWM_FREQ
+        float clkdiv = 1.0f;
+        uint32_t f_sys = clock_get_hz(clk_sys);
+        uint32_t wrap = (uint32_t)((float)f_sys / (clkdiv * (float)pinscfg::PWM_FREQ_HZ) - 1.0f);
+        pwm_set_wrap(slice, wrap);
+        pwm_set_clkdiv(slice, clkdiv);
         pwm_set_enabled(slice, true);
         pwm_set_chan_level(slice, chan, 0);
     };
-    setup_pwm(MOTOR_LEFT_PWM_PIN);
-    setup_pwm(MOTOR_RIGHT_PWM_PIN);
+    setup_pwm(pinscfg::MOTOR_LEFT_PWM_PIN);
+    setup_pwm(pinscfg::MOTOR_RIGHT_PWM_PIN);
     // Blades PWM
-    setup_pwm(BLADE1_PWM_PIN);
-    setup_pwm(BLADE2_PWM_PIN);
+    setup_pwm(pinscfg::BLADE1_PWM_PIN);
+    setup_pwm(pinscfg::BLADE2_PWM_PIN);
 
-    BNO055 imu(0x28);
+    BNO055 imu(pinscfg::BNO055_ADDR);
     bool ok = imu.begin();
 
     absolute_time_t last = get_absolute_time();
@@ -135,18 +85,20 @@ int main() {
 
     // Motor control state
     float left_cmd = 0.0f, right_cmd = 0.0f; // [-1..1]
-    float max_abs_speed = 1.0f;
-    float accel_limit = 5.0f; // units per second
+    float max_abs_speed = pinscfg::DEFAULT_MAX_ABS_SPEED;
+    float accel_limit = pinscfg::DEFAULT_ACCEL_LIMIT; // units per second
     bool relay_enabled = false;
+    bool uart_led_on = false;
+    uint32_t last_uart_activity_ms = 0;
 
     proto::COBSStreamDecoder decoder(256);
 
     // Encoders
-    SingleChannelEncoder encL(MOTOR_LEFT_ENC_PIN, 200);
-    SingleChannelEncoder encR(MOTOR_RIGHT_ENC_PIN, 200);
+    SingleChannelEncoder encL(pinscfg::MOTOR_LEFT_ENC_PIN, 200);
+    SingleChannelEncoder encR(pinscfg::MOTOR_RIGHT_ENC_PIN, 200);
 
     // PCF8574 (inputs)
-    PCF8574 pcf(I2C, PCF8574_ADDR);
+    PCF8574 pcf(I2C, pinscfg::PCF8574_ADDR);
     bool pcf_ok = true;
     // try initial write to configure all high (inputs with pull-ups)
     pcf_ok = pcf.write_port(0xFF);
@@ -160,17 +112,17 @@ int main() {
     bool last_aux1=false, last_aux2=false, last_aux3=false, last_aux4=false;
 
     // Sonar and battery
-    Sonar3 sonar(US_FRONT_LEFT_TRIG_PIN, US_FRONT_LEFT_ECHO_PIN,
-                 US_FRONT_CENTER_TRIG_PIN, US_FRONT_CENTER_ECHO_PIN,
-                 US_FRONT_RIGHT_TRIG_PIN, US_FRONT_RIGHT_ECHO_PIN,
-                 SONAR_TIMEOUT_US);
+    Sonar3 sonar(pinscfg::US_FRONT_LEFT_TRIG_PIN, pinscfg::US_FRONT_LEFT_ECHO_PIN,
+                 pinscfg::US_FRONT_CENTER_TRIG_PIN, pinscfg::US_FRONT_CENTER_ECHO_PIN,
+                 pinscfg::US_FRONT_RIGHT_TRIG_PIN, pinscfg::US_FRONT_RIGHT_ECHO_PIN,
+                 pinscfg::SONAR_TIMEOUT_US);
     bool sonar_ok = true;
-    INA226 batt(I2C, 0x40, 0.002f, 20.0f);
+    INA226 batt(I2C, pinscfg::INA226_ADDR, pinscfg::INA226_SHUNT_OHMS, pinscfg::INA226_MAX_CURRENT_A);
     bool batt_ok = batt.ok();
 
     // Blade encoders for RPM
-    SingleChannelEncoder bladeEnc1(BLADE1_ENC_PIN, 150);
-    SingleChannelEncoder bladeEnc2(BLADE2_ENC_PIN, 150);
+    SingleChannelEncoder bladeEnc1(pinscfg::BLADE1_ENC_PIN, 150);
+    SingleChannelEncoder bladeEnc2(pinscfg::BLADE2_ENC_PIN, 150);
 
     // Blades motor command state (persist across frames)
     static float blade1_cmd = 0.0f, blade2_cmd = 0.0f;
@@ -184,7 +136,7 @@ int main() {
         if (a > 1.0f) a = 1.0f;
         uint slice = pwm_gpio_to_slice_num(pwm_pin);
         uint chan = pwm_gpio_to_channel(pwm_pin);
-        uint16_t level = static_cast<uint16_t>(a * 65535.0f);
+        uint16_t level = static_cast<uint16_t>(a * pinscfg::PWM_DUTY_MAX);
         pwm_set_chan_level(slice, chan, level);
     };
 
@@ -199,7 +151,21 @@ int main() {
         while (uart_is_readable(uart0) && n < sizeof(rxbuf)) {
             rxbuf[n++] = uart_getc(uart0);
         }
-        if (n > 0) decoder.feed(rxbuf, n);
+
+        // UART LED auto-off after inactivity timeout
+        if (uart_led_on) {
+            uint32_t now_ms2 = to_ms_since_boot(get_absolute_time());
+            if (now_ms2 - last_uart_activity_ms > pinscfg::UART_LED_TIMEOUT_MS) {
+                gpio_put(pinscfg::LED_PIN, 0);
+                uart_led_on = false;
+            }
+        }
+        if (n > 0) {
+            decoder.feed(rxbuf, n);
+            gpio_put(pinscfg::LED_PIN, 1);
+            uart_led_on = true;
+            last_uart_activity_ms = to_ms_since_boot(get_absolute_time());
+        }
 
         // Handle any full frames
         proto::DecodedFrame f;
@@ -208,7 +174,11 @@ int main() {
                 case proto::MSG_CMD_RELAY: {
                     if (f.payload.size() >= 1) {
                         relay_enabled = f.payload[0] != 0;
-                        gpio_put(SAFETY_RELAY_PIN, relay_enabled ? 1 : 0);
+                        // ON -> level = active_low ? 0 : 1; OFF -> active_low ? 1 : 0
+                        uint level = 0;
+                        if (relay_enabled) level = pinscfg::RELAY_ACTIVE_LOW ? 0u : 1u;
+                        else level = pinscfg::RELAY_ACTIVE_LOW ? 1u : 0u;
+                        gpio_put(pinscfg::SAFETY_RELAY_PIN, level);
                     }
                 } break;
                 case proto::MSG_CMD_DRIVE: {
@@ -256,24 +226,27 @@ int main() {
         if (l_cmd < -max_abs_speed) l_cmd = -max_abs_speed;
         if (r_cmd > max_abs_speed) r_cmd = max_abs_speed;
         if (r_cmd < -max_abs_speed) r_cmd = -max_abs_speed;
-        apply_motor(l_cmd, MOTOR_LEFT_PWM_PIN, MOTOR_LEFT_DIR_PIN, LEFT_DIR_INVERTED);
-        apply_motor(r_cmd, MOTOR_RIGHT_PWM_PIN, MOTOR_RIGHT_DIR_PIN, RIGHT_DIR_INVERTED);
+        if (fabsf(l_cmd) < pinscfg::DEFAULT_DEADZONE) l_cmd = 0.0f;
+        if (fabsf(r_cmd) < pinscfg::DEFAULT_DEADZONE) r_cmd = 0.0f;
+        apply_motor(l_cmd, pinscfg::MOTOR_LEFT_PWM_PIN, pinscfg::MOTOR_LEFT_DIR_PIN, pinscfg::LEFT_DIR_INVERTED);
+        apply_motor(r_cmd, pinscfg::MOTOR_RIGHT_PWM_PIN, pinscfg::MOTOR_RIGHT_DIR_PIN, pinscfg::RIGHT_DIR_INVERTED);
 
         // Blades motor control: track commands (persist across frames)
-        static float blade1_cmd = 0.0f, blade2_cmd = 0.0f;
         // Update from last received frame if any was decoded
         // We updated inside MSG_CMD_BLADES case above, but ensure persistence
         // Apply safety gate
         float b1_apply = relay_enabled ? blade1_cmd : 0.0f;
         float b2_apply = relay_enabled ? blade2_cmd : 0.0f;
+        if (fabsf(b1_apply) < pinscfg::BLADE_DEFAULT_DEADZONE) b1_apply = 0.0f;
+        if (fabsf(b2_apply) < pinscfg::BLADE_DEFAULT_DEADZONE) b2_apply = 0.0f;
         // Apply to hardware
-        apply_motor(b1_apply, BLADE1_PWM_PIN, BLADE1_DIR_PIN, false);
-        apply_motor(b2_apply, BLADE2_PWM_PIN, BLADE2_DIR_PIN, false);
+        apply_motor(b1_apply, pinscfg::BLADE1_PWM_PIN, pinscfg::BLADE1_DIR_PIN, false);
+        apply_motor(b2_apply, pinscfg::BLADE2_PWM_PIN, pinscfg::BLADE2_DIR_PIN, false);
 
-        // IMU @100Hz
+        // IMU @ pinscfg::IMU_RATE_HZ
         static uint32_t imu_last_ms = 0;
         uint32_t now_ms = to_ms_since_boot(get_absolute_time());
-        if (now_ms - imu_last_ms >= 10) {
+        if (now_ms - imu_last_ms >= (1000 / pinscfg::IMU_RATE_HZ)) {
             imu_last_ms = now_ms;
             std::array<float,10> vec{};
             bool have = ok && imu.read_all(vec);
@@ -293,21 +266,26 @@ int main() {
             std::memcpy(payload.data()+36, &vec[9], 4);
             std::vector<uint8_t> enc;
             proto::pack_and_encode(proto::MSG_IMU, payload, seq++, now_ms, enc);
-            if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+            if (!enc.empty()) {
+                uart_write_blocking(uart0, enc.data(), enc.size());
+                gpio_put(pinscfg::LED_PIN, 1);
+                uart_led_on = true;
+                last_uart_activity_ms = now_ms;
+            }
         }
 
-        // Odom @10Hz reale con encoder single-channel
+        // Odom @ pinscfg::ODOM_RATE_HZ con encoder single-channel
         static uint32_t odom_last_ms = 0;
-        if (now_ms - odom_last_ms >= (1000/ODOM_RATE_HZ)) {
+        if (now_ms - odom_last_ms >= (1000/pinscfg::ODOM_RATE_HZ)) {
             uint32_t dt_ms = now_ms - odom_last_ms;
             odom_last_ms = now_ms;
             int32_t tL = encL.read_and_reset();
             int32_t tR = encR.read_and_reset();
             // segno da dir pins
-            bool dirL_fwd = gpio_get(MOTOR_LEFT_DIR_PIN) != 0;
-            bool dirR_fwd = gpio_get(MOTOR_RIGHT_DIR_PIN) != 0;
-            if (LEFT_DIR_INVERTED) dirL_fwd = !dirL_fwd;
-            if (RIGHT_DIR_INVERTED) dirR_fwd = !dirR_fwd;
+            bool dirL_fwd = gpio_get(pinscfg::MOTOR_LEFT_DIR_PIN) != 0;
+            bool dirR_fwd = gpio_get(pinscfg::MOTOR_RIGHT_DIR_PIN) != 0;
+            if (pinscfg::LEFT_DIR_INVERTED) dirL_fwd = !dirL_fwd;
+            if (pinscfg::RIGHT_DIR_INVERTED) dirR_fwd = !dirR_fwd;
             int sL = dirL_fwd ? 1 : -1;
             int sR = dirR_fwd ? 1 : -1;
             tL *= sL;
@@ -320,12 +298,17 @@ int main() {
             std::memcpy(payload.data()+8, &dt, 4);
             std::vector<uint8_t> enc;
             proto::pack_and_encode(proto::MSG_ODOM, payload, seq++, now_ms, enc);
-            if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+            if (!enc.empty()) {
+                uart_write_blocking(uart0, enc.data(), enc.size());
+                gpio_put(pinscfg::LED_PIN, 1);
+                uart_led_on = true;
+                last_uart_activity_ms = now_ms;
+            }
         }
 
-        // PCF8574 poll @10Hz -> eventi
+        // PCF8574 poll @ pinscfg::PCF_POLL_HZ -> eventi
         static uint32_t pcf_last_ms = 0;
-        if (now_ms - pcf_last_ms >= (1000/PCF_POLL_HZ)) {
+        if (now_ms - pcf_last_ms >= (1000/pinscfg::PCF_POLL_HZ)) {
             pcf_last_ms = now_ms;
             uint8_t val = 0xFF;
             bool okread = pcf.read_port(val);
@@ -333,15 +316,15 @@ int main() {
                 pcf_ok = false;
             } else {
                 pcf_ok = true;
-                // Active-low for rain, bumpers and lift per MicroPython mapping
-                bool rain = ((val >> PCF_BIT_RAIN) & 1) == 0;
-                bool lift = ((val >> PCF_BIT_LIFT) & 1) == 1; // lift active-high in MP code? they used GPIO helpers; set true if bit=1
-                bool bL = ((val >> PCF_BIT_BUMPER_LEFT) & 1) == 1;
-                bool bR = ((val >> PCF_BIT_BUMPER_RIGHT) & 1) == 1;
-                bool aux1 = ((val >> PCF_BIT_AUX1) & 1) == 1;
-                bool aux2 = ((val >> PCF_BIT_AUX2) & 1) == 1;
-                bool aux3 = ((val >> PCF_BIT_AUX3) & 1) == 1;
-                bool aux4 = ((val >> PCF_BIT_AUX4) & 1) == 1;
+                // Active-low per rain, bumpers e lift per MicroPython mapping
+                bool rain = ((val >> pinscfg::PCF_BIT_RAIN) & 1) == 0;
+                bool lift = ((val >> pinscfg::PCF_BIT_LIFT) & 1) == 1; // lift active-high
+                bool bL = ((val >> pinscfg::PCF_BIT_BUMPER_LEFT) & 1) == 1;
+                bool bR = ((val >> pinscfg::PCF_BIT_BUMPER_RIGHT) & 1) == 1;
+                bool aux1 = ((val >> pinscfg::PCF_BIT_AUX1) & 1) == 1;
+                bool aux2 = ((val >> pinscfg::PCF_BIT_AUX2) & 1) == 1;
+                bool aux3 = ((val >> pinscfg::PCF_BIT_AUX3) & 1) == 1;
+                bool aux4 = ((val >> pinscfg::PCF_BIT_AUX4) & 1) == 1;
 
                 // Build bitfield
                 uint16_t bf = 0;
@@ -364,7 +347,12 @@ int main() {
                     payload[1] = static_cast<uint8_t>((bf >> 8) & 0xFF);
                     std::vector<uint8_t> enc;
                     proto::pack_and_encode(proto::MSG_EVENT, payload, seq++, now_ms, enc);
-                    if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+                    if (!enc.empty()) {
+                        uart_write_blocking(uart0, enc.data(), enc.size());
+                        gpio_put(pinscfg::LED_PIN, 1);
+                        uart_led_on = true;
+                        last_uart_activity_ms = now_ms;
+                    }
                     last_rain = rain; last_lift = lift; last_bL = bL; last_bR = bR;
                     last_aux1 = aux1; last_aux2 = aux2; last_aux3 = aux3; last_aux4 = aux4;
                     last_enabled_state = relay_enabled;
@@ -373,9 +361,9 @@ int main() {
             }
         }
 
-        // Sonar @SONAR_RATE_HZ
+        // Sonar @ pinscfg::SONAR_RATE_HZ
         static uint32_t sonar_last_ms = 0;
-        if (now_ms - sonar_last_ms >= (1000/SONAR_RATE_HZ)) {
+        if (now_ms - sonar_last_ms >= (1000/pinscfg::SONAR_RATE_HZ)) {
             sonar_last_ms = now_ms;
             float dL= -1.0f, dC= -1.0f, dR= -1.0f;
             sonar_ok = sonar.read_all(dL, dC, dR);
@@ -390,7 +378,12 @@ int main() {
             std::memcpy(payload.data()+8, &dR, 4);
             std::vector<uint8_t> enc;
             proto::pack_and_encode(proto::MSG_SONAR, payload, seq++, now_ms, enc);
-            if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+            if (!enc.empty()) {
+                uart_write_blocking(uart0, enc.data(), enc.size());
+                gpio_put(pinscfg::LED_PIN, 1);
+                uart_led_on = true;
+                last_uart_activity_ms = now_ms;
+            }
             if (!sonar_ok) {
                 // emit error event bit 15
                 uint16_t bf = (1u<<15);
@@ -399,13 +392,18 @@ int main() {
                 ev[1] = static_cast<uint8_t>((bf>>8)&0xFF);
                 std::vector<uint8_t> enc2;
                 proto::pack_and_encode(proto::MSG_EVENT, ev, seq++, now_ms, enc2);
-                if (!enc2.empty()) uart_write_blocking(uart0, enc2.data(), enc2.size());
+                if (!enc2.empty()) {
+                    uart_write_blocking(uart0, enc2.data(), enc2.size());
+                    gpio_put(pinscfg::LED_PIN, 1);
+                    uart_led_on = true;
+                    last_uart_activity_ms = now_ms;
+                }
             }
         }
 
-        // Battery @BATT_RATE_HZ
+        // Battery @ pinscfg::BATT_RATE_HZ
         static uint32_t batt_last_ms = 0;
-        if (now_ms - batt_last_ms >= (1000/BATT_RATE_HZ)) {
+        if (now_ms - batt_last_ms >= (1000/pinscfg::BATT_RATE_HZ)) {
             batt_last_ms = now_ms;
             float v= -1.0f, a= 0.0f;
             if (batt_ok) {
@@ -419,24 +417,34 @@ int main() {
                 ev[1] = static_cast<uint8_t>((bf>>8)&0xFF);
                 std::vector<uint8_t> enc2;
                 proto::pack_and_encode(proto::MSG_EVENT, ev, seq++, now_ms, enc2);
-                if (!enc2.empty()) uart_write_blocking(uart0, enc2.data(), enc2.size());
+                if (!enc2.empty()) {
+                    uart_write_blocking(uart0, enc2.data(), enc2.size());
+                    gpio_put(pinscfg::LED_PIN, 1);
+                    uart_led_on = true;
+                    last_uart_activity_ms = now_ms;
+                }
             }
             std::vector<uint8_t> payload(2*sizeof(float));
             std::memcpy(payload.data()+0, &v, 4);
             std::memcpy(payload.data()+4, &a, 4);
             std::vector<uint8_t> enc;
             proto::pack_and_encode(proto::MSG_BATT, payload, seq++, now_ms, enc);
-            if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+            if (!enc.empty()) {
+                uart_write_blocking(uart0, enc.data(), enc.size());
+                gpio_put(pinscfg::LED_PIN, 1);
+                uart_led_on = true;
+                last_uart_activity_ms = now_ms;
+            }
         }
 
-        // Blades RPM @BLADE_RPM_RATE_HZ
+        // Blades RPM @ pinscfg::BLADE_RPM_RATE_HZ
         static uint32_t blade_last_ms = 0;
-        if (now_ms - blade_last_ms >= (1000/BLADE_RPM_RATE_HZ)) {
+        if (now_ms - blade_last_ms >= (1000/pinscfg::BLADE_RPM_RATE_HZ)) {
             uint32_t dt_ms = now_ms - blade_last_ms;
             blade_last_ms = now_ms;
             int32_t c1 = bladeEnc1.read_and_reset();
             int32_t c2 = bladeEnc2.read_and_reset();
-            float ppr_blade = BLADE_PULSES_PER_REV_MOTOR * BLADE_GEAR_RATIO;
+            float ppr_blade = pinscfg::BLADE_PULSES_PER_REV_MOTOR * pinscfg::BLADE_GEAR_RATIO;
             if (ppr_blade <= 0.0f) ppr_blade = 1.0f;
             float dtb = dt_ms / 1000.0f;
             float rpm1 = (dtb > 0.0f) ? ((static_cast<float>(c1) / ppr_blade) / dtb * 60.0f) : 0.0f;
@@ -446,7 +454,12 @@ int main() {
             std::memcpy(payload.data()+4, &rpm2, 4);
             std::vector<uint8_t> enc;
             proto::pack_and_encode(proto::MSG_BLADES_RPM, payload, seq++, now_ms, enc);
-            if (!enc.empty()) uart_write_blocking(uart0, enc.data(), enc.size());
+            if (!enc.empty()) {
+                uart_write_blocking(uart0, enc.data(), enc.size());
+                gpio_put(pinscfg::LED_PIN, 1);
+                uart_led_on = true;
+                last_uart_activity_ms = now_ms;
+            }
         }
     }
 }

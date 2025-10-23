@@ -5,3 +5,4 @@ mower_ws/build
 mower_ws/install
 mower_ws/log
 mower_ws/maps/
+pico_cpp_ws/firmware/build
