@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>mower_joy_bridge</name>
+  <version>0.1.0</version>
+  <description>Bridge C++ tra joystick DS4 (sensor_msgs/Joy) e macchina a stati/attuatori del mower.</description>
+  <maintainer email="maintainer@example.com">maintainer</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

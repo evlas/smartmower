@@ -156,6 +156,14 @@ def generate_launch_description():
         parameters=[events_bridge_yaml]
     )
 
+    # Mower Joy Bridge (DS4 -> eventi e attuatori)
+    mower_joy_bridge_node = Node(
+        package='mower_joy_bridge',
+        executable='joy_bridge_node',
+        name='mower_joy_bridge',
+        output='screen'
+    )
+
     # Twist Mux (incluso da launch dedicato)
     twist_mux_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -269,6 +277,7 @@ def generate_launch_description():
 #        safety_supervisor_node,
         sm_node,
         events_bridge_node,
+        mower_joy_bridge_node,
 
         twist_mux_launch,
         twist_mux_selector_node,
