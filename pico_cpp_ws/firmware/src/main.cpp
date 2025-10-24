@@ -1,3 +1,10 @@
+/**
+ * @file main.cpp
+ * @brief Entry-point firmware RP2040: inizializzazione periferiche e loop principale.
+ *
+ * @details Configura UART, I2C, PWM, GPIO e istanzia i driver sensori/attuatori.
+ * Gestisce il protocollo seriale (COBS) per comandi e invio telemetrie (IMU, odom, sonar, batteria, RPM lame).
+ */
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "hardware/i2c.h"
@@ -21,6 +28,10 @@
 // I2C instance
 static i2c_inst_t* I2C = i2c0;
 
+/**
+ * @brief Punto di ingresso del firmware.
+ * @return 0 se eseguito correttamente (non ritorna in normale operatività).
+ */
 int main() {
     stdio_init_all();
 
@@ -57,6 +68,10 @@ int main() {
     gpio_put(pinscfg::MOTOR_RIGHT_DIR_PIN, 0);
 
     // Motor PWM setup using pinscfg::PWM_FREQ_HZ
+    /**
+     * @brief Configura il PWM per un dato GPIO.
+     * @param pin GPIO da associare al PWM.
+     */
     auto setup_pwm = [](uint pin){
         gpio_set_function(pin, GPIO_FUNC_PWM);
         uint slice = pwm_gpio_to_slice_num(pin);
@@ -127,6 +142,13 @@ int main() {
     // Blades motor command state (persist across frames)
     static float blade1_cmd = 0.0f, blade2_cmd = 0.0f;
 
+    /**
+     * @brief Applica un comando normalizzato [-1..1] a un canale motore.
+     * @param cmd Comando normalizzato [-1..1].
+     * @param pwm_pin GPIO PWM.
+     * @param dir_pin GPIO direzione.
+     * @param inv_dir Se true, inverte la logica di direzione.
+     */
     auto apply_motor = [&](float cmd, uint pwm_pin, uint dir_pin, bool inv_dir){
         bool fwd = cmd >= 0.0f;
         if (inv_dir) fwd = !fwd;

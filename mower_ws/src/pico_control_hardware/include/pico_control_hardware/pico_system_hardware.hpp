@@ -1,3 +1,7 @@
+/**
+ * @file pico_system_hardware.hpp
+ * @brief Interfaccia hardware ROS2 Control per il sistema di trazione/attuatori (RP2040).
+ */
 #pragma once
 
 #include <hardware_interface/system_interface.hpp>
@@ -22,34 +26,55 @@
 namespace pico_control_hardware
 {
 
+/**
+ * @class PicoSystemHardware
+ * @brief Implementazione di SystemInterface per interfacciare ROS2 Control con il firmware Pico.
+ */
 class PicoSystemHardware : public hardware_interface::SystemInterface
 {
 public:
   RCLCPP_SHARED_PTR_DEFINITIONS(PicoSystemHardware)
 
-  // New API (Jazzy): prefer this to avoid deprecation warnings
+  /**
+   * @brief Inizializzazione con nuova API (Jazzy): parsing parametri hardware.
+   * @param params Parametri dell'interfaccia hardware.
+   * @return CallbackReturn esito.
+   */
   hardware_interface::CallbackReturn on_init(
     const hardware_interface::HardwareComponentInterfaceParams & params) override;
 
+  /** @brief Inizializzazione legacy con HardwareInfo. */
   hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo & info) override;
+  /** @brief Configura risorse e stato prima dell'attivazione. */
   hardware_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State & previous_state) override;
+  /** @brief Attiva l'hardware prima di iniziare read/write. */
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State & previous_state) override;
+  /** @brief Disattiva l'hardware in modo ordinato. */
   hardware_interface::CallbackReturn on_deactivate(const rclcpp_lifecycle::State & previous_state) override;
 
+  /** @brief Esporta interfacce di stato (posizioni/velocità). */
   std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
+  /** @brief Esporta interfacce di comando (target). */
   std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
 
+  /** @brief Lettura ciclica dei dati dall'hardware. */
   hardware_interface::return_type read(const rclcpp::Time & time, const rclcpp::Duration & period) override;
+  /** @brief Scrittura ciclica dei comandi verso l'hardware. */
   hardware_interface::return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
 
 private:
   // serial helpers
+  /** @brief Apre la seriale a una determinata porta/baudrate. */
   bool open_serial(const std::string & port, int baudrate);
+  /** @brief Chiude la seriale se aperta. */
   void close_serial();
+  /** @brief Impacchetta e scrive un frame verso il dispositivo. */
   void write_frame(uint8_t msg_id, const std::vector<uint8_t> &payload);
 
   // helpers
+  /** @brief CRC16-CCITT utility. */
   static uint16_t crc16_ccitt(const uint8_t *data, size_t len, uint16_t init = 0xFFFF);
+  /** @brief COBS-encode utility. */
   static void cobs_encode(const std::vector<uint8_t> &in, std::vector<uint8_t> &out);
 
   // params

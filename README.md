@@ -4,7 +4,7 @@
 
 [![ROS2](https://img.shields.io/badge/ROS2-Jazzy-blue.svg)](https://docs.ros.org/en/jazzy/)
 [![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-5-red.svg)](https://www.raspberrypi.com/)
-[![MicroPython](https://img.shields.io/badge/MicroPython-Pico-yellow.svg)](https://micropython.org/)
+[![C++](https://img.shields.io/badge/C%2B%2B-Pico%20SDK-blue.svg)](https://github.com/raspberrypi/pico-sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Robot tagliaerba autonomo intelligente con navigazione GPS, sensori avanzati e controllo remoto.**
@@ -88,10 +88,10 @@ mower/
 │   │   └── mower_description/      # Descrizione URDF del robot
 │   └── README.md                   # Documentazione ROS 2 dettagliata
 │
-├── 📁 pico_micropython_ws/         # Firmware Raspberry Pi Pico
-│   └── firmware/                   # Codice MicroPython per sensori/attuatori
-│       ├── main.py                 # Firmware principale Pico
-│       ├── app/                    # Moduli applicazione
+├── 📁 pico_cpp_ws/                # Firmware Raspberry Pi Pico (C++)
+│   └── firmware/                   # Codice C++ per sensori/attuatori
+│       ├── src/                    # Sorgenti (.cpp/.hpp)
+│       ├── CMakeLists.txt          # Configurazione build
 │       └── README.md               # Documentazione firmware
 │
 ├── 📄 mower.code-workspace         # Configurazione VS Code
@@ -153,9 +153,8 @@ sudo apt update && sudo apt install ros-jazzy-desktop
 # Navigazione autonoma (Nav2) e mappatura (RTAB-Map)
 sudo apt install ros-jazzy-nav2-bringup ros-jazzy-rtabmap-ros
 
-# MicroPython per Pico
-sudo apt install python3-venv
-pip3 install thonny  # IDE per Pico
+# Pico SDK per firmware C/C++ del Raspberry Pi Pico
+# Segui la sezione "Firmware Raspberry Pi Pico" qui sotto per l'installazione e la configurazione complete del Pico SDK.
 ```
 
 ### Build del Progetto
@@ -177,15 +176,74 @@ source ~/.bashrc
 ```
 
 ### Firmware Raspberry Pi Pico
-```bash
-# Installa MicroPython su Pico
-# 1. Tieni premuto BOOTSEL su Pico e collega via USB
-# 2. Copia firmware MicroPython nella nuova unità (RPI-RP2)
-# 3. Scollega e ricollega Pico
 
-# Carica il codice del progetto
-cd pico_micropython_ws/firmware
-# Usa Thonny o ampy per caricare main.py e app/ su Pico
+⚠️ **IMPORTANTE**: Non utilizzare `pico_micropython_ws` in quanto MicroPython non supporta le frequenze I2C richieste dai sensori. Utilizzare invece `pico_cpp_ws` con il firmware C++.
+
+#### Reperire e Configurare Pico SDK
+
+```bash
+# 1. Installa dipendenze per la compilazione
+sudo apt install cmake gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential
+
+# 2. Clona il Pico SDK
+git clone https://github.com/raspberrypi/pico-sdk.git
+cd pico-sdk
+git submodule update --init
+
+# 3. Configura ambiente
+echo 'export PICO_SDK_PATH="$HOME/pico-sdk"' >> ~/.bashrc
+echo 'export PICO_TOOLCHAIN_PATH="/usr"' >> ~/.bashrc
+source ~/.bashrc
+
+# 4. Verifica installazione
+cmake --version  # Dovrebbe mostrare versione >= 3.13
+arm-none-eabi-gcc --version  # Dovrebbe mostrare toolchain ARM
+```
+
+#### Compilare il Firmware C++
+
+```bash
+# 1. Entra nella directory del firmware C++
+cd pico_cpp_ws/firmware
+
+# 2. Crea directory build
+mkdir build
+cd build
+
+# 3. Configura CMake con Pico SDK
+cmake -DCMAKE_BUILD_TYPE=Release ..
+
+# 4. Compila il firmware
+make -j$(nproc)
+
+# 5. Il firmware compilato sarà in build/src/firmware.elf e build/src/firmware.uf2
+```
+
+#### Caricare il Firmware su Pico
+
+```bash
+# 1. Tieni premuto il pulsante BOOTSEL su Pico e collega via USB
+# 2. Pico apparirà come unità RPI-RP2
+# 3. Copia il file .uf2 nella nuova unità
+cp build/src/firmware.uf2 /media/$USER/RPI-RP2/
+
+# 4. Pico si riavvierà automaticamente con il nuovo firmware
+# 5. Verifica l'output via script di sniffing seriale (protocollo Pico)
+python3 /home/ubuntu/mower/pico_cpp_ws/utils/serial_imu_sniffer.py --pico --port /dev/ttyAMA0 --baud 230400
+# In alternativa, se usi la porta USB CDC del Pico:
+# python3 /home/ubuntu/mower/pico_cpp_ws/utils/serial_imu_sniffer.py --pico --port /dev/ttyACM0 --baud 115200
+```
+
+#### Debug e Monitoraggio
+
+```bash
+# Monitoraggio output firmware
+python3 /home/ubuntu/mower/pico_cpp_ws/utils/serial_imu_sniffer.py --pico --port /dev/ttyAMA0 --baud 230400
+
+# Debug con OpenOCD (se disponibile)
+# 1. Collega Pico in modalità debug (SWD)
+# 2. openocd -f interface/raspberrypi-swd.cfg -f target/rp2040.cfg
+# 3. gdb-multiarch build/src/firmware.elf
 ```
 
 ## ⚙️ Configurazione
@@ -371,7 +429,7 @@ ros2 run mower_coverage coverage_planner_test.py
 ### Debug e Troubleshooting
 ```bash
 # Monitoraggio seriale Pico
-sudo minicom -D /dev/ttyAMA0 -b 115200
+python3 /home/ubuntu/mower/pico_cpp_ws/utils/serial_imu_sniffer.py --pico --port /dev/ttyAMA0 --baud 230400
 
 # Debug ROS 2
 export RCUTILS_LOGGING_LEVEL=DEBUG
@@ -383,29 +441,16 @@ ros2 launch mower_bringup bringup_pico.launch.py
 ### Sistema Base
 - **ROS 2 Jazzy** - Framework robotico
 - **Raspberry Pi OS** - Sistema operativo
-- **MicroPython** - Firmware per Raspberry Pi Pico
+- **Pico SDK** - Framework C/C++ per Raspberry Pi Pico
 
 ### Pacchetti ROS 2
 - **rclcpp** - Client C++ ROS 2
 - **sensor_msgs** - Messaggi sensori
 - **geometry_msgs** - Messaggi geometria
 - **diagnostic_msgs** - Messaggi diagnostica
-- **tf2_ros** - Trasformazioni
-- **cv_bridge** - Bridge OpenCV
-- **camera_info_manager** - Gestione informazioni camera
-- **hardware_interface** - Interfacce hardware ros2_control
-- **nav2_bringup** - Sistema di navigazione completo
-- **nav2_* (tutti i componenti)** - Pianificazione percorsi, controllo, costmap, etc.
-- **rtabmap_ros** - Mappatura 3D e localizzazione visuale
-- **rtabmap_* (tutti i componenti)** - SLAM monoculare, ottimizzazione, etc.
-
-### Pacchetti Futuri Previsti
-- **mower_coverage** - Algoritmi ottimizzazione percorsi
-- **robot_localization** - Fusione sensori (EKF)
-
-- **[📖 Documentazione ROS 2](mower_ws/README.md)** - Guida completa al workspace ROS 2
+- **tf2_ros** - **[📖 Documentazione ROS 2](mower_ws/README.md)** - Guida completa al workspace ROS 2
 - **[🔧 Hardware](hardware/)** - Schema elettrico e documentazione hardware
-- **[⚙️ Firmware Pico](pico_micropython_ws/firmware/README.md)** - Protocollo e documentazione firmware
+- **[⚙️ Firmware Pico](pico_cpp_ws/firmware/README.md)** - Protocollo e documentazione firmware C++
 - **[🧪 Test](uart_test.py)** - Script di test e validazione
 
 ## 🤝 Contribuire
@@ -429,10 +474,10 @@ Questo progetto è distribuito sotto licenza **MIT**. Vedi il file [LICENSE](LIC
 ## 🙏 Ringraziamenti
 
 - **ROS 2 Community** per l'eccellente framework robotico
-- **Raspberry Pi Foundation** per l'hardware accessibile
-- **MicroPython Team** per il firmware embedded
+- **Raspberry Pi Foundation** per l'hardware accessibile e il Pico SDK
+- **Pico SDK Team** per l'eccellente toolchain di sviluppo C/C++
 
-## 📞 Supportomail.com
+## 📞 Supporto
 
 Per domande, problemi o suggerimenti:
 

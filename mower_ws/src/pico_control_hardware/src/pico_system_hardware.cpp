@@ -1,3 +1,7 @@
+/**
+ * @file pico_system_hardware.cpp
+ * @brief Implementazione dell'interfaccia ROS2 Control verso il firmware Pico (seriale COBS).
+ */
 #include "pico_control_hardware/pico_system_hardware.hpp"
 
 #include <hardware_interface/types/hardware_interface_type_values.hpp>

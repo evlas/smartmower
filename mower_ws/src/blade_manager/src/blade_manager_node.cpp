@@ -1,3 +1,7 @@
+/**
+ * @file blade_manager_node.cpp
+ * @brief Nodo ROS2 per gestione velocità lame in base allo stato del mower.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
@@ -11,8 +15,13 @@
 using std::placeholders::_1;
 using namespace std::chrono_literals;
 
+/**
+ * @class BladeManager
+ * @brief Decide e pubblica il comando lame in funzione dello stato corrente.
+ */
 class BladeManager : public rclcpp::Node {
 public:
+  /** @brief Costruttore: dichiara parametri, crea ROS pub/sub e timer. */
   BladeManager() : Node("blade_manager") {
     // Parameters
     state_topic_ = this->declare_parameter<std::string>("state_topic", "/mower/state");
@@ -46,10 +55,12 @@ public:
   }
 
 private:
+  /** @brief Callback stato macchina a stati. */
   void on_state(const std_msgs::msg::String::SharedPtr msg) {
     current_state_ = msg->data;
   }
 
+  /** @brief Callback RPM lame [left,right]. */
   void on_rpm(const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
     // Expect [blade1_rpm, blade2_rpm]
     if (msg->data.size() >= 1) last_rpm_left_ = msg->data[0];
@@ -57,10 +68,12 @@ private:
     last_rpm_time_ = this->now();
   }
 
+  /** @brief Ritorna true se lo stato corrente richiede lame ON. */
   bool state_requires_blades_on() const {
     return std::find(enable_states_.begin(), enable_states_.end(), current_state_) != enable_states_.end();
   }
 
+  /** @brief Loop di controllo periodico: decide e pubblica il comando. */
   void control_loop() {
     const auto now = this->now();
 
@@ -75,11 +88,13 @@ private:
     publish_blades(desired);
   }
 
+  /** @brief Gestione stall (TODO: da implementare quando disponibili RPM affidabili). */
   void handle_stall(const rclcpp::Time & now) {
     // TODO: Implementare gestione stall quando avremo dati RPM da pico_control_hardware
     RCLCPP_WARN(get_logger(), "Rilevazione stall non ancora implementata - necessita dati RPM da pico_control_hardware");
   }
 
+  /** @brief Pubblica comando lame come Float32MultiArray [left,right]. */
   void publish_blades(double speed) {
     std_msgs::msg::Float32MultiArray msg;
     msg.data = {static_cast<float>(speed), static_cast<float>(speed)};

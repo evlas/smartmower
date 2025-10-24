@@ -1,3 +1,10 @@
+/**
+ * @file safety_supervisor.cpp
+ * @brief Nodo ROS2 che valuta condizioni di sicurezza e pubblica E-Stop.
+ *
+ * @details Ascolta tilt, lift, diagnostica e genera condizioni di arresto e messaggi
+ * diagnostici derivati. Parametri configurabili per timeout e livelli di errore.
+ */
 #include <chrono>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
@@ -11,9 +18,14 @@
 
 using namespace std::chrono_literals;
 
+/**
+ * @class SafetySupervisor
+ * @brief Supervisiona segnali di sicurezza e pubblica lo stato di E-Stop.
+ */
 class SafetySupervisor : public rclcpp::Node
 {
 public:
+    /** @brief Costruttore: inizializza pub/sub, parametri e timer. */
     SafetySupervisor() : Node("safety_supervisor"), last_error_update_(this->now())
     {
         // Inizializzazione publisher
@@ -213,14 +225,9 @@ private:
         kv.key = "active_errors";
         kv.value = std::to_string(active_errors_.size());
         estop_status.values.push_back(kv);
-        
+
+        // Accoda lo stato e pubblica
         msg.status.push_back(estop_status);
-        
-        // Aggiungi tutti gli errori attivi
-        for (const auto& [name, status] : active_errors_) {
-            msg.status.push_back(status);
-        }
-        
         diagnostics_pub_->publish(msg);
     }
 

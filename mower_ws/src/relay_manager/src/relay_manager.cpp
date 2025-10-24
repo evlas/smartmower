@@ -1,3 +1,7 @@
+/**
+ * @file relay_manager.cpp
+ * @brief Nodo ROS2 per la gestione del relè di sicurezza in base allo stato.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -6,8 +10,13 @@
 
 using std::placeholders::_1;
 
+/**
+ * @class RelayManager
+ * @brief Pubblica il comando relè in funzione dello stato della macchina e verifica allineamento.
+ */
 class RelayManager : public rclcpp::Node {
 public:
+  /** @brief Costruttore: parametri, pub/sub e log iniziale. */
   RelayManager() : Node("relay_manager") {
     // Parametri configurabili
     state_topic_ = this->declare_parameter<std::string>("state_topic", "/mower/state");
@@ -36,6 +45,7 @@ public:
   }
 
 private:
+  /** @brief Callback stato macchina: decide ON/OFF del relè. */
   void state_callback(const std_msgs::msg::String::ConstSharedPtr msg) {
     std::string state = msg->data;
     bool should_relay_be_on = false;
@@ -57,6 +67,7 @@ private:
     }
   }
 
+  /** @brief Pubblica il comando relè e avvia controllo di allineamento. */
   void publish_relay_state(bool on) {
     std_msgs::msg::Bool msg;
     msg.data = on;
@@ -76,6 +87,7 @@ private:
       std::bind(&RelayManager::check_alignment_timeout, this));
   }
 
+  /** @brief Callback stato reale del relè, verifica allineamento. */
   void relay_state_callback(const std_msgs::msg::Bool::ConstSharedPtr msg) {
     current_relay_state_ = msg->data;
 
@@ -93,6 +105,7 @@ private:
     }
   }
 
+  /** @brief Gestisce timeout di allineamento del relè. */
   void check_alignment_timeout() {
     if (waiting_for_alignment_) {
       // Timeout scaduto - relay non si è allineato
@@ -105,6 +118,7 @@ private:
     }
   }
 
+  /** @brief Pubblica un flag di errore sul relè. */
   void publish_relay_error(bool error) {
     std_msgs::msg::Bool msg;
     msg.data = error;

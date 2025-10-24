@@ -1,3 +1,7 @@
+/**
+ * @file protocol.hpp
+ * @brief Definizione protocollo seriale: ID messaggi, CRC16, COBS e decoder stream.
+ */
 #pragma once
 #include <cstdint>
 #include <vector>

@@ -1,7 +1,18 @@
+/**
+ * @file protocol.cpp
+ * @brief Implementazione utilità protocollo: CRC16, COBS e packing/decoding frame.
+ */
 #include "protocol.hpp"
 
 namespace proto {
 
+/**
+ * @brief Calcola il CRC16-CCITT (poly 0x1021) con valore iniziale selezionabile.
+ * @param data Puntatore ai dati.
+ * @param len Lunghezza buffer.
+ * @param init Valore di inizializzazione (default 0xFFFF nel .hpp).
+ * @return CRC16 calcolato.
+ */
 uint16_t crc16_ccitt(const uint8_t* data, size_t len, uint16_t init) {
     uint16_t crc = init;
     for (size_t i = 0; i < len; ++i) {
@@ -13,6 +24,11 @@ uint16_t crc16_ccitt(const uint8_t* data, size_t len, uint16_t init) {
     return crc;
 }
 
+/**
+ * @brief Esegue la codifica COBS del buffer di input.
+ * @param in Buffer di input (senza terminatore 0x00).
+ * @param out Buffer codificato (viene svuotato e riscritto).
+ */
 void cobs_encode(const std::vector<uint8_t>& in, std::vector<uint8_t>& out) {
     out.clear();
     out.reserve(in.size() + 2);
@@ -40,6 +56,14 @@ void cobs_encode(const std::vector<uint8_t>& in, std::vector<uint8_t>& out) {
     out.push_back(0x00);
 }
 
+/**
+ * @brief Impacchetta header+payload, aggiunge CRC e applica COBS.
+ * @param msg_id ID messaggio.
+ * @param payload Dati payload.
+ * @param seq Numero di sequenza.
+ * @param ts_ms Timestamp in millisecondi.
+ * @param encoded Buffer di output codificato COBS (senza 0x00 finale).
+ */
 void pack_and_encode(uint8_t msg_id, const std::vector<uint8_t>& payload,
                      uint8_t seq, uint32_t ts_ms,
                      std::vector<uint8_t>& encoded) {
@@ -62,6 +86,12 @@ void pack_and_encode(uint8_t msg_id, const std::vector<uint8_t>& payload,
 // ---- Decoder side ----
 static constexpr size_t HEADER_SIZE = 7; // id(1) len(1) seq(1) ts(4)
 
+/**
+ * @brief Decodifica COBS di un buffer (senza 0x00 di terminazione).
+ * @param in Buffer COBS codificato.
+ * @param out Buffer decodificato.
+ * @return true se la decodifica ha successo.
+ */
 bool cobs_decode(const std::vector<uint8_t>& in, std::vector<uint8_t>& out) {
     out.clear();
     size_t idx = 0;
@@ -77,8 +107,17 @@ bool cobs_decode(const std::vector<uint8_t>& in, std::vector<uint8_t>& out) {
     return true;
 }
 
+/**
+ * @brief Costruttore del decoder stream COBS.
+ * @param max_frame Dimensione massima accettata del frame intermedio.
+ */
 COBSStreamDecoder::COBSStreamDecoder(size_t max_frame) : max_(max_frame) {}
 
+/**
+ * @brief Alimenta il decoder con bytes grezzi del wire (terminati da 0x00).
+ * @param data Puntatore ai bytes.
+ * @param len  Numero di bytes.
+ */
 void COBSStreamDecoder::feed(const uint8_t* data, size_t len) {
     if (!data || len == 0) return;
     for (size_t i = 0; i < len; ++i) {
@@ -97,6 +136,11 @@ void COBSStreamDecoder::feed(const uint8_t* data, size_t len) {
     }
 }
 
+/**
+ * @brief Estrae il prossimo frame decodificato, se disponibile.
+ * @param outf Struttura in cui restituire il frame.
+ * @return true se un frame è stato estratto e parsificato correttamente.
+ */
 bool COBSStreamDecoder::pop_frame(DecodedFrame& outf) {
     if (frames_.empty()) return false;
     std::vector<uint8_t> f = std::move(frames_.front());
@@ -104,6 +148,12 @@ bool COBSStreamDecoder::pop_frame(DecodedFrame& outf) {
     return parse_frame(f, outf);
 }
 
+/**
+ * @brief Parsifica un frame decodificato, verifica CRC e popola header/payload.
+ * @param decoded Buffer decodificato (header+payload+crc senza 0x00).
+ * @param out Struttura di uscita con header e payload.
+ * @return true se parsing e CRC sono validi.
+ */
 bool parse_frame(const std::vector<uint8_t>& decoded, DecodedFrame& out) {
     if (decoded.size() < HEADER_SIZE + 2) return false;
     const size_t total = decoded.size();

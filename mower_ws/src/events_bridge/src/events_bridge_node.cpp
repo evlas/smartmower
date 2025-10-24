@@ -1,10 +1,19 @@
+/**
+ * @file events_bridge_node.cpp
+ * @brief Nodo ROS2 che traduce un bitfield di eventi in topic booleani.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/u_int16.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <string>
 
+/**
+ * @class EventsBridge
+ * @brief Converte il bitfield eventi (UInt16) in topic booleani e error flags.
+ */
 class EventsBridge : public rclcpp::Node {
 public:
+  /** @brief Costruttore: dichiara parametri, crea publisher e subscriber. */
   EventsBridge() : Node("events_bridge") {
     // Parameters
     events_topic_ = this->declare_parameter<std::string>("events_topic", "/events/pcf8574");
@@ -72,8 +81,10 @@ public:
   }
 
 private:
+  /** @brief True se il bit specificato è impostato nel valore a 16 bit. */
   inline bool is_set(uint16_t v, int bit) const { return bit >= 0 && bit < 16 && ((v >> bit) & 0x1); }
 
+  /** @brief Callback: decodifica il bitfield e pubblica i topic corrispondenti. */
   void on_events(const std_msgs::msg::UInt16::SharedPtr msg) {
     const uint16_t e = msg->data;
     std_msgs::msg::Bool b;

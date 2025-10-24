@@ -1,3 +1,7 @@
+/**
+ * @file sonar3.hpp
+ * @brief Interfaccia per driver a 3 sensori ultrasuoni (L,C,R) con trigger/echo.
+ */
 #pragma once
 #include <cstdint>
 #include "pico/stdlib.h"
@@ -25,7 +29,12 @@ public:
     bool read_all(float &dL, float &dC, float &dR);
 
 private:
+    /** \brief Misura singola distanza per una coppia trigger/echo.
+     *  \return Distanza in metri o valore negativo su timeout/errore.
+     */
     static float measure_once(uint trig, uint echo, uint32_t timeout_us);
+    /** \brief GPIO trigger/echo per L, C, R. */
     uint tL_, eL_, tC_, eC_, tR_, eR_;
+    /** \brief Timeout massimo per misura singola (us). */
     uint32_t timeout_us_;
 };

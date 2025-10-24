@@ -1,3 +1,10 @@
+/**
+ * @file battery_manager_node.cpp
+ * @brief Nodo ROS2 per gestione batteria: stima percentuale, eventi e diagnostica.
+ *
+ * @details Supporta input alternativi (battery_raw, battery_state, voltage),
+ * pubblica `/diagnostics` e genera eventi come `LOW_BATTERY` su `/mower/event`.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/battery_state.hpp>
 #include <std_msgs/msg/float32.hpp>
@@ -12,8 +19,15 @@
 
 using std::placeholders::_1;
 
+/**
+ * @class BatteryManagerNode
+ * @brief Gestisce la valutazione stato batteria e la segnalazione diagnostica/eventi.
+ */
 class BatteryManagerNode : public rclcpp::Node {
 public:
+  /**
+   * @brief Costruttore: dichiara parametri, crea pub/sub e log iniziale.
+   */
   BatteryManagerNode()
   : Node("battery_manager")
   {
@@ -89,6 +103,10 @@ private:
   }
 
   // Callback per BatteryState: estrae percentuale e stato e delega alla logica comune
+  /**
+   * @brief Callback per `sensor_msgs::BatteryState`.
+   * @param msg Messaggio di stato batteria.
+   */
   void onBattery(const sensor_msgs::msg::BatteryState::SharedPtr msg) {
     double pct = NAN;
     uint8_t power_status = msg->power_supply_status;
@@ -121,6 +139,10 @@ private:
   }
 
   // Callback per batteria grezza: [voltage, current]
+  /**
+   * @brief Callback per batteria grezza `[voltage, current]`.
+   * @param msg Array con V e A.
+   */
   void onBatteryRaw(const std_msgs::msg::Float32MultiArray::SharedPtr msg) {
     double voltage = NAN;
     double current = NAN;
@@ -148,6 +170,10 @@ private:
   }
 
   // Callback per sola tensione: calcola percentuale lineare tra voltage_min_v_ e voltage_max_v_
+  /**
+   * @brief Callback per sola tensione del bus.
+   * @param msg Tensione [V].
+   */
   void onBatteryVoltage(const std_msgs::msg::Float32::SharedPtr msg) {
     double v = static_cast<double>(msg->data);
     double pct = NAN;
@@ -164,6 +190,11 @@ private:
   }
 
   // Logica comune per generare eventi/diagnostica
+  /**
+   * @brief Logica comune per soglie, isteresi e generazione diagnostica/eventi.
+   * @param pct Percentuale batteria [0..100] o NaN se non disponibile.
+   * @param power_supply_status Stato alimentazione (charging/discharging/...).
+   */
   void processBatteryLogic(double pct, uint8_t power_supply_status) {
     const bool discharging = (power_supply_status == sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_DISCHARGING);
     const bool charging    = (power_supply_status == sensor_msgs::msg::BatteryState::POWER_SUPPLY_STATUS_CHARGING);

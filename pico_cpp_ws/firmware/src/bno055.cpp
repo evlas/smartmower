@@ -1,3 +1,10 @@
+/**
+ * @file bno055.cpp
+ * @brief Implementazione del driver minimale BNO055 (RP2040, I2C).
+ *
+ * @details Contiene l'inizializzazione del sensore e una lettura burst dei
+ * registri di interesse per quaternione, accelerazioni e velocità angolari.
+ */
 #include "bno055.hpp"
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
@@ -16,26 +23,59 @@ static constexpr uint8_t OPR_NDOF       = 0x0C;
 
 static constexpr uint8_t REG_ACCEL_X_LSB = 0x08; // burst base
 
+/**
+ * @brief Costruttore con indirizzo I2C.
+ * @param addr Indirizzo a 7 bit del dispositivo.
+ */
 BNO055::BNO055(uint8_t addr) : addr_(addr) {}
 
+/**
+ * @brief Scrive un byte in un registro del BNO055.
+ * @param reg Registro di destinazione.
+ * @param val Valore da scrivere.
+ * @return true se la write I2C ha successo (2 byte trasferiti).
+ */
 bool BNO055::write8(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = {reg, val};
     return i2c_write_blocking(i2c0, addr_, buf, 2, false) == 2;
 }
 
+/**
+ * @brief Legge N byte consecutivi partendo da un registro.
+ * @param reg Registro di partenza.
+ * @param n Numero di byte da leggere.
+ * @param dst Buffer di destinazione (>= n).
+ * @return true se la sequenza write+read I2C ha successo.
+ */
 bool BNO055::readN(uint8_t reg, uint8_t n, uint8_t* dst) {
     if (i2c_write_blocking(i2c0, addr_, &reg, 1, true) != 1) return false;
     return i2c_read_blocking(i2c0, addr_, dst, n, false) == n;
 }
 
+/**
+ * @brief Inizializza il sensore: modalità CONFIG, reset, unità, modalità NDOF.
+ * @return true se tutte le operazioni hanno successo e l'ID chip è corretto.
+ */
 bool BNO055::begin() {
-    sleep_ms(50);
+    // Attendi completamento POR del micro interno e disponibilità del CHIP_ID
+    sleep_ms(800);
+    {
+        uint8_t id = 0;
+        absolute_time_t t0 = get_absolute_time();
+        const uint32_t timeout_ms = 1200;
+        bool ready = false;
+        while ((to_ms_since_boot(get_absolute_time()) - to_ms_since_boot(t0)) < timeout_ms) {
+            if (readN(REG_CHIP_ID, 1, &id) && id == CHIP_ID) { ready = true; break; }
+            sleep_ms(20);
+        }
+        if (!ready) return false;
+    }
     // Enter CONFIG mode
     if (!write8(REG_OPR_MODE, OPR_CONFIG)) return false;
     sleep_ms(30);
     // Page 0
     write8(REG_PAGE_ID, 0);
-    // Check chip ID
+    // Check chip ID (sanity re-check)
     uint8_t id=0;
     if (!readN(REG_CHIP_ID, 1, &id) || id != CHIP_ID) return false;
     // Reset
@@ -51,6 +91,11 @@ bool BNO055::begin() {
     return true;
 }
 
+/**
+ * @brief Esegue una lettura burst dei principali dati IMU.
+ * @param out Restituisce {qw,qx,qy,qz, ax,ay,az, gx,gy,gz}.
+ * @return true se la lettura ha successo.
+ */
 bool BNO055::read_all(std::array<float,10>& out) {
     // Burst 0x08..0x27 (32B): accel(6) + mag(6) + gyro(6) + euler(6) + quat(8)
     uint8_t raw[32] = {0};

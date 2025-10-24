@@ -1,3 +1,7 @@
+/**
+ * @file pcf8574.hpp
+ * @brief Interfaccia minimale per expander I2C PCF8574 (8 bit).
+ */
 #pragma once
 #include <cstdint>
 #include "hardware/i2c.h"
@@ -18,6 +22,8 @@ public:
     /** \brief Scrive l'intero port (8 bit). */
     bool write_port(uint8_t val);
 private:
+    /** \brief Istanza I2C. */
     i2c_inst_t* i2c_;
+    /** \brief Indirizzo 7-bit del dispositivo. */
     uint8_t addr_;
 };

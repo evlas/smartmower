@@ -1,3 +1,7 @@
+/**
+ * @file rpi_gpio_node.cpp
+ * @brief Nodo ROS2 per pubblicare lo stato dei GPIO Raspberry Pi come topic booleani.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/bool.hpp>
 
@@ -18,8 +22,13 @@ struct LineCfg {
   std::string name;
 };
 
+/**
+ * @class RpiGpioNode
+ * @brief Legge linee GPIO tramite libgpiod e pubblica messaggi Bool con debounce.
+ */
 class RpiGpioNode : public rclcpp::Node {
 public:
+  /** @brief Costruttore: parametri, apertura chip, configurazione linee e timer. */
   RpiGpioNode() : Node("rpi_gpio") {
     // Parameters
     chip_name_ = declare_parameter<std::string>("chip_name", "gpiochip0");
@@ -66,6 +75,7 @@ public:
                 debounce_ms_);
   }
 
+  /** @brief Distruttore: rilascia linee e chiude il chip. */
   ~RpiGpioNode() override {
     for (auto & kv : lines_) {
       if (kv.second.line) gpiod_line_release(kv.second.line);
@@ -82,6 +92,12 @@ private:
     return ns + "/" + leaf;
   }
 
+  /** @brief Configura una linea di input e crea relativo publisher.
+   *  @param name Nome logico della linea.
+   *  @param pin GPIO number.
+   *  @param active_low True se la linea è attiva-bassa.
+   *  @param topic Topic su cui pubblicare.
+   */
   void add_input_line(const std::string &name, int pin, bool active_low, const std::string &topic) {
     if (pin < 0) return; // disabled
     gpiod_line* line = gpiod_chip_get_line(chip_, pin);
@@ -121,6 +137,9 @@ private:
                 name.c_str(), pin, topic.c_str(), active_low?"low":"high");
   }
 
+  /** @brief Legge lo stato logico della linea considerando la polarità.
+   *  @return true se linea attiva, false altrimenti.
+   */
   bool read_line(const LineHandle &lh) {
     int val = gpiod_line_get_value(lh.line);
     if (val < 0) return lh.last;
@@ -128,6 +147,9 @@ private:
     return logical;
   }
 
+  /** @brief Pubblica su ROS lo stato della linea e logga variazioni.
+   *  @param initial Se true, log informativo iniziale.
+   */
   void publish(LineHandle &lh, bool state, bool initial=false) {
     std_msgs::msg::Bool m; m.data = state;
     lh.pub->publish(m);
@@ -143,6 +165,8 @@ private:
       std::chrono::steady_clock::now().time_since_epoch()).count();
   }
 
+  /** @brief Loop di polling con debounce in millisecondi.
+   */
   void poll_lines() {
     for (auto & kv : lines_) {
       auto & lh = kv.second;

@@ -1,3 +1,7 @@
+/**
+ * @file state_machine_node.cpp
+ * @brief Nodo ROS2 che implementa una semplice macchina a stati del mower.
+ */
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -5,6 +9,10 @@
 
 using std::placeholders::_1;
 
+/**
+ * @class StateMachineNode
+ * @brief Macchina a stati con transizioni guidate da eventi, estop ed errori.
+ */
 class StateMachineNode : public rclcpp::Node {
 public:
   enum class State {
@@ -19,6 +27,7 @@ public:
     PAUSED
   };
 
+  /** @brief Costruttore: crea pub/sub e timer e imposta lo stato iniziale. */
   StateMachineNode() : Node("mower_state_machine") {
     // Parameters
     cmd_timeout_s_ = declare_parameter<double>("cmd_timeout", 1.0);
@@ -56,6 +65,7 @@ public:
   }
 
   // Gestione degli errori
+  /** @brief Callback errori di sicurezza: transisce a stato ERROR. */
   void on_error(const std_msgs::msg::String::SharedPtr msg) {
     RCLCPP_ERROR(get_logger(), "Safety error received: %s", msg->data.c_str());
     set_state(State::ERROR);

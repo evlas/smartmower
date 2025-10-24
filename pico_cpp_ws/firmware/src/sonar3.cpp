@@ -1,6 +1,20 @@
+/**
+ * @file sonar3.cpp
+ * @brief Implementazione driver per 3 sensori ultrasuoni con trigger/echo.
+ */
 #include "sonar3.hpp"
 #include "pico/time.h"
 
+/**
+ * @brief Costruttore: configura GPIO trigger/echo per i tre sensori.
+ * @param trig_L GPIO trigger sinistra
+ * @param echo_L GPIO echo sinistra
+ * @param trig_C GPIO trigger centro
+ * @param echo_C GPIO echo centro
+ * @param trig_R GPIO trigger destra
+ * @param echo_R GPIO echo destra
+ * @param timeout_us Timeout misura singola (us)
+ */
 Sonar3::Sonar3(uint trig_L, uint echo_L,
                uint trig_C, uint echo_C,
                uint trig_R, uint echo_R,
@@ -14,6 +28,13 @@ Sonar3::Sonar3(uint trig_L, uint echo_L,
     gpio_init(eR_); gpio_set_dir(eR_, GPIO_IN);
 }
 
+/**
+ * @brief Misura singola distanza su una coppia trigger/echo.
+ * @param trig GPIO trigger.
+ * @param echo GPIO echo.
+ * @param timeout_us Timeout massimo in microsecondi.
+ * @return Distanza in metri, o negativo su timeout/errore.
+ */
 float Sonar3::measure_once(uint trig, uint echo, uint32_t timeout_us) {
     // Trigger 10us pulse
     gpio_put(trig, 0);
@@ -37,6 +58,13 @@ float Sonar3::measure_once(uint trig, uint echo, uint32_t timeout_us) {
     return dist;
 }
 
+/**
+ * @brief Legge le tre distanze in sequenza L, C, R.
+ * @param dL Distanza sinistra (m).
+ * @param dC Distanza centro (m).
+ * @param dR Distanza destra (m).
+ * @return true sempre; valori negativi indicano timeout.
+ */
 bool Sonar3::read_all(float &dL, float &dC, float &dR) {
     dL = measure_once(tL_, eL_, timeout_us_);
     sleep_us(200);
@@ -45,3 +73,4 @@ bool Sonar3::read_all(float &dL, float &dC, float &dR) {
     dR = measure_once(tR_, eR_, timeout_us_);
     return true;
 }
+
