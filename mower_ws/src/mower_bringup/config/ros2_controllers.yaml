@@ -13,8 +13,8 @@ diff_drive_controller:
   ros__parameters:
     left_wheel_names: ["left_wheel_joint"]
     right_wheel_names: ["right_wheel_joint"]
-    wheel_separation: 0.55
-    wheel_radius: 0.30
+    wheel_separation: 0.455
+    wheel_radius: 0.15
     base_frame_id: base_link
     odom_frame_id: odom
     enable_odom_tf: false

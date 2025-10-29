@@ -1,4 +1,7 @@
-ekf_filter_node:
+## \file ekf_local.yaml
+## \brief Configurazione EKF locale (odom->base_link) con fusione encoders + IMU
+## \details Pubblica /odometry/local e la TF odom->base_link. Nessun ingresso GPS.
+ekf_local_node:
   ros__parameters:
     frequency: 50.0
     two_d_mode: true

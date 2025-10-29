@@ -1,0 +1,54 @@
+## \file ekf_global.yaml
+## \brief Configurazione EKF globale (map->odom) e NavSat Transform
+## \details Fonde odometria locale e GPS per pubblicare /odometry/global e la TF map->odom.
+## NavSat usa IMU su /imu/data e l'odometria locale su /odometry/local.
+
+navsat_transform_node:
+  ros__parameters:
+    two_d_mode: true
+    zero_altitude: true
+    publish_filtered_gps: true
+    magnetic_declination_radians: 0.0
+    yaw_offset: 0.0
+    use_odometry_yaw: false
+    wait_for_datum: false
+    broadcast_cartesian_transform: false
+    imu0: /imu/data
+
+ekf_global_node:
+  ros__parameters:
+    frequency: 30.0
+    two_d_mode: true
+    publish_tf: true
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: map
+
+    # Inputs
+    # Odometria locale dall'EKF locale
+    odom0: /odometry/local
+    odom0_differential: false
+    odom0_queue_size: 10
+    # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+
+    # Odometria GPS dal NavSat Transform
+    odom1: /odometry/gps
+    odom1_differential: false
+    odom1_queue_size: 10
+    # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+    odom1_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+
+    # Generale
+    sensor_timeout: 0.2
+    reset_on_time_jump: true
+    print_diagnostics: true
